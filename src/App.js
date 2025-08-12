@@ -965,8 +965,8 @@ const AnimationControls = ({ partKey, params, setAnimationParams }) => {
             <h3 className="text-lg font-semibold text-cyan-300 mb-3">3. Animate '{partKey}'</h3>
             <div className="space-y-4">
                 <Control param="rotation" label="Rotation (°)" icon={<RotateCcw size={16} />} min="-45" max="45" step="1" />
-                <Control param="moveX" label="Horizontal Move" icon={<Play className="rotate-0" size={16} />} min="-3" max="3" step="0.1" />
-                <Control param="moveY" label="Vertical Move" icon={<Play className="-rotate-90" size={16} />} min="-3" max="3" step="0.1" />
+                <Control param="moveX" label="Horizontal Move" icon={<Play className="rotate-0" size={16} />} min="-10" max="10" step="0.1" />
+                <Control param="moveY" label="Vertical Move" icon={<Play className="-rotate-90" size={16} />} min="-10" max="10" step="0.1" />
                 <Control param="scale" label="Scale" icon={<Zap size={16} />} min="0.5" max="2" step="0.05" />
                 <Control param="speed" label="Speed" icon={<Zap size={16} />} min="1" max="5" step="0.5" />
                 <Control param="offset" label="Phase Offset" icon={<Play className="rotate-180" size={16} />} min="0" max="360" />
