@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Scissors, Pin, Play, Wind, RotateCcw, Trash2, PlusCircle, Zap, MousePointer, AlertTriangle, Download, Settings, Copy, Save, GripVertical, ArrowUp, ArrowDown, Film } from 'lucide-react';
 
-// Dynamically load GIF.js script
 const loadScript = (src) => {
     return new Promise((resolve, reject) => {
         if (document.querySelector(`script[src="${src}"]`)) {
