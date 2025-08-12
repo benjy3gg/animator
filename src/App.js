@@ -15,11 +15,7 @@ const loadScript = (src) => {
     });
 };
 
-// Helper function to calculate color distance
-const colorDistance = (r1, g1, b1, r2, g2, b2) => {
-    // A simple and fast Euclidean distance calculation for RGB colors
-    return Math.sqrt(Math.pow(r1 - r2, 2) + Math.pow(g1 - g2, 2) + Math.pow(b1 - b2, 2));
-};
+// Helper function removed as it's no longer needed
 
 
 // Main App Component
@@ -31,7 +27,16 @@ const App = () => {
     const [bitmaps, setBitmaps] = useState({});
     const [animationParams, setAnimationParams] = useState({});
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+    // Check if user has seen the help modal before
+    const [isHelpModalOpen, setIsHelpModalOpen] = useState(() => {
+        try {
+            return localStorage.getItem('hasSeenHelpModal') !== 'true';
+        } catch (error) {
+            // If localStorage is not available, default to showing the modal
+            console.warn('localStorage is not available:', error);
+            return true;
+        }
+    });
     const [isRendering, setIsRendering] = useState(false);
     const [isLoadingDefaults, setIsLoadingDefaults] = useState(true);
 
@@ -79,19 +84,12 @@ const App = () => {
         fetchDefaults();
     }, []);
 
-    // Function to update bitmaps with smart, color-based selection
+    // Function to update bitmaps based on user-drawn paths only
     const updateBitmaps = useCallback(async (newParts) => {
         if (!image) return;
         try {
             const newBitmaps = {};
             const { width, height } = image;
-
-            const originalImageCanvas = document.createElement('canvas');
-            originalImageCanvas.width = width;
-            originalImageCanvas.height = height;
-            const originalImageCtx = originalImageCanvas.getContext('2d');
-            originalImageCtx.drawImage(image, 0, 0);
-            const originalImageData = originalImageCtx.getImageData(0, 0, width, height).data;
 
             const masterMaskCanvas = document.createElement('canvas');
             masterMaskCanvas.width = width;
@@ -102,69 +100,19 @@ const App = () => {
                 const part = newParts[key];
                 if (part.paths.add.length === 0) continue;
 
-                const coreMaskCanvas = document.createElement('canvas');
-                coreMaskCanvas.width = width;
-                coreMaskCanvas.height = height;
-                const coreMaskCtx = coreMaskCanvas.getContext('2d');
+                const partMaskCanvas = document.createElement('canvas');
+                partMaskCanvas.width = width;
+                partMaskCanvas.height = height;
+                const partMaskCtx = partMaskCanvas.getContext('2d');
 
+                // Draw the user-defined paths directly without color-based expansion
                 part.paths.add.forEach(path => {
-                    coreMaskCtx.beginPath();
-                    if(path.length > 0) coreMaskCtx.moveTo(path[0].x, path[0].y);
-                    path.forEach(p => coreMaskCtx.lineTo(p.x, p.y));
-                    coreMaskCtx.closePath();
-                    coreMaskCtx.fill();
+                    partMaskCtx.beginPath();
+                    if(path.length > 0) partMaskCtx.moveTo(path[0].x, path[0].y);
+                    path.forEach(p => partMaskCtx.lineTo(p.x, p.y));
+                    partMaskCtx.closePath();
+                    partMaskCtx.fill();
                 });
-                const coreMask = coreMaskCtx.getImageData(0, 0, width, height);
-
-                const borderPixels = [];
-                for (let y = 1; y < height - 1; y++) {
-                    for (let x = 1; x < width - 1; x++) {
-                        const index = (y * width + x) * 4;
-                        if (coreMask.data[index + 3] > 0) {
-                            if (coreMask.data[index - 4 + 3] === 0 || coreMask.data[index + 4 + 3] === 0 || coreMask.data[index - width * 4 + 3] === 0 || coreMask.data[index + width * 4 + 3] === 0) {
-                                borderPixels.push({x, y});
-                            }
-                        }
-                    }
-                }
-
-                const finalPartMaskCanvas = document.createElement('canvas');
-                finalPartMaskCanvas.width = width;
-                finalPartMaskCanvas.height = height;
-                const finalPartMaskCtx = finalPartMaskCanvas.getContext('2d');
-                finalPartMaskCtx.putImageData(coreMask, 0, 0);
-                const finalPartMaskData = finalPartMaskCtx.getImageData(0, 0, width, height);
-
-                const NEIGHBORHOOD = 8;
-                const TOLERANCE = 45;
-
-                borderPixels.forEach(({x, y}) => {
-                    const borderIndex = (y * width + x) * 4;
-                    const r1 = originalImageData[borderIndex];
-                    const g1 = originalImageData[borderIndex + 1];
-                    const b1 = originalImageData[borderIndex + 2];
-
-                    for (let ny = -NEIGHBORHOOD; ny <= NEIGHBORHOOD; ny++) {
-                        for (let nx = -NEIGHBORHOOD; nx <= NEIGHBORHOOD; nx++) {
-                            const currentX = x + nx;
-                            const currentY = y + ny;
-
-                            if (currentX >= 0 && currentX < width && currentY >= 0 && currentY < height) {
-                                const neighborIndex = (currentY * width + currentX) * 4;
-                                if (originalImageData[neighborIndex + 3] > 0 && finalPartMaskData.data[neighborIndex + 3] === 0) {
-                                    const r2 = originalImageData[neighborIndex];
-                                    const g2 = originalImageData[neighborIndex + 1];
-                                    const b2 = originalImageData[neighborIndex + 2];
-
-                                    if (colorDistance(r1, g1, b1, r2, g2, b2) < TOLERANCE) {
-                                        finalPartMaskData.data[neighborIndex + 3] = 255;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                });
-                finalPartMaskCtx.putImageData(finalPartMaskData, 0, 0);
 
                 const partCanvas = document.createElement('canvas');
                 partCanvas.width = width;
@@ -172,10 +120,10 @@ const App = () => {
                 const partCtx = partCanvas.getContext('2d');
                 partCtx.drawImage(image, 0, 0);
                 partCtx.globalCompositeOperation = 'destination-in';
-                partCtx.drawImage(finalPartMaskCanvas, 0, 0);
+                partCtx.drawImage(partMaskCanvas, 0, 0);
                 newBitmaps[key] = await createImageBitmap(partCanvas);
 
-                masterMaskCtx.drawImage(finalPartMaskCanvas, 0, 0);
+                masterMaskCtx.drawImage(partMaskCanvas, 0, 0);
             }
 
             const bodyCanvas = document.createElement('canvas');
@@ -331,7 +279,14 @@ const App = () => {
             )}
             {isHelpModalOpen && (
                 <HelpModal 
-                    onClose={() => setIsHelpModalOpen(false)}
+                    onClose={() => {
+                        try {
+                            localStorage.setItem('hasSeenHelpModal', 'true');
+                        } catch (error) {
+                            console.warn('Could not save help modal preference:', error);
+                        }
+                        setIsHelpModalOpen(false);
+                    }}
                 />
             )}
         </div>
@@ -460,7 +415,7 @@ const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChang
         }
 
         const newParts = { ...parts, [trimmedName]: { paths: { add: [] }, anchor: null, boundingBox: null } };
-        const newAnimParams = { ...animationParams, [trimmedName]: { rotation: 0, moveX: 0, moveY: 0, scale: 1, speed: 1, offset: 0 } };
+        const newAnimParams = { ...animationParams, [trimmedName]: { rotation: 0, moveX: 0, moveY: 0, scale: 1, speed: 1, offset: 0, tintColor: "#ff0000", tintIntensity: 0 } };
 
         onPartsChange(newParts);
         setAnimationParams(newAnimParams);
@@ -521,7 +476,7 @@ const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChang
                     />
                 )}
             </div>
-            <div className="lg:col-span-2 grid md:grid-cols-2 gap-6">
+            <div className="lg:col-span-2 grid lg:grid-cols-2 gap-6">
                  <SpriteEditor 
                     image={image} 
                     parts={parts}
@@ -601,6 +556,7 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
     const [cursorPos, setCursorPos] = useState({ x: 0, y: 0, visible: false });
     const longPressTimer = useRef();
     const touchStartPos = useRef({ x: 0, y: 0 });
+    const isMouseDownRef = useRef(false);
 
     const getCanvasPos = (e) => {
         const canvas = canvasRef.current;
@@ -613,41 +569,14 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
         return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
     };
 
-    const handleMouseDown = (e) => {
-        if (!activePart) return;
-        e.preventDefault();
-
-        if (e.altKey) {
-            const pos = getCanvasPos(e);
-            const updatedPart = { ...parts[activePart], anchor: pos };
-            onPartsChange({ ...parts, [activePart]: updatedPart });
-        } else {
-            setIsDrawing(true);
-            setCurrentPath([getCanvasPos(e)]);
-        }
-    };
-
-    const handleMouseMove = (e) => {
-        const pos = getCanvasPos(e);
-        setCursorPos({ x: pos.x, y: pos.y, visible: true });
-        if (!isDrawing) return;
-        e.preventDefault();
-        setCurrentPath(prev => [...prev, pos]);
-    };
-
-    const handleMouseUp = (e) => {
-        if (!isDrawing) {
-            setCursorPos(prev => ({...prev, visible: false}));
-            return;
-        }
+    // Function to finalize the path and create the part - memoized with useCallback
+    const finalizePath = useCallback(() => {
         if (!activePart || currentPath.length < 3) {
             setIsDrawing(false);
             setCurrentPath([]);
             setCursorPos(prev => ({...prev, visible: false}));
             return;
         }
-        e.preventDefault();
-        setIsDrawing(false);
 
         const newPaths = { add: [currentPath], subtract: [] };
 
@@ -664,6 +593,68 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
 
         onPartsChange({ ...parts, [activePart]: { paths: newPaths, anchor, boundingBox } });
         setCurrentPath([]);
+        setIsDrawing(false);
+    }, [activePart, currentPath, parts, onPartsChange, setCurrentPath, setIsDrawing, setCursorPos]);
+
+    // Add global mouse event listeners
+    useEffect(() => {
+        const handleGlobalMouseUp = () => {
+            if (isDrawing) {
+                finalizePath();
+            }
+            isMouseDownRef.current = false;
+        };
+
+        // Add global event listeners
+        window.addEventListener('mouseup', handleGlobalMouseUp);
+
+        // Clean up
+        return () => {
+            window.removeEventListener('mouseup', handleGlobalMouseUp);
+        };
+    }, [isDrawing, finalizePath]);
+
+    const handleMouseDown = (e) => {
+        if (!activePart) return;
+        e.preventDefault();
+        isMouseDownRef.current = true;
+
+        if (e.altKey) {
+            const pos = getCanvasPos(e);
+            const updatedPart = { ...parts[activePart], anchor: pos };
+            onPartsChange({ ...parts, [activePart]: updatedPart });
+        } else {
+            setIsDrawing(true);
+            setCurrentPath([getCanvasPos(e)]);
+        }
+    };
+
+    const handleMouseMove = (e) => {
+        const pos = getCanvasPos(e);
+        setCursorPos({ x: pos.x, y: pos.y, visible: true });
+
+        // Continue drawing if mouse is down and we're in drawing mode
+        if (isDrawing && isMouseDownRef.current) {
+            e.preventDefault();
+            setCurrentPath(prev => [...prev, pos]);
+        }
+    };
+
+    const handleMouseUp = (e) => {
+        if (!isDrawing) {
+            setCursorPos(prev => ({...prev, visible: false}));
+            return;
+        }
+
+        e.preventDefault();
+        // The actual finalization is handled by the global mouse up handler
+        // This is just for when the mouse up happens inside the canvas
+        finalizePath();
+        setCursorPos(prev => ({...prev, visible: false}));
+    };
+
+    const handleMouseLeave = (e) => {
+        // Only hide the cursor when mouse leaves, but don't end drawing
         setCursorPos(prev => ({...prev, visible: false}));
     };
 
@@ -777,11 +768,11 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
                 onMouseDown={handleMouseDown} 
                 onMouseMove={handleMouseMove} 
                 onMouseUp={handleMouseUp} 
-                onMouseLeave={handleMouseUp}
+                onMouseLeave={handleMouseLeave}
                 onTouchStart={handleTouchStart}
                 onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
-                className="max-w-full max-h-[50vh] object-contain cursor-crosshair"
+                className="max-w-full max-h-[80vh] min-h-[400px] object-contain cursor-crosshair"
                 style={{ touchAction: 'none' }}
             />
             <Magnifier sourceCanvasRef={canvasRef} cursorPos={cursorPos} zoomLevel={4} />
@@ -868,11 +859,43 @@ const drawFrame = (ctx, bitmaps, parts, animationParams, partOrder, time) => {
         const currentMoveY = params.moveY * cycle;
         const currentScale = 1 + (params.scale - 1) * Math.abs(cycle);
 
+        // Apply color tint effect if tintIntensity > 0
+        const applyTint = params.tintIntensity > 0;
+        const tintCycle = Math.abs(cycle); // Use absolute value for tint cycle to make it blink
+        const currentTintIntensity = params.tintIntensity * tintCycle;
+
         ctx.save();
         ctx.translate(part.anchor.x + currentMoveX, part.anchor.y + currentMoveY);
         ctx.rotate(currentRotation);
         ctx.scale(currentScale, currentScale);
+
+        // Draw the part
         ctx.drawImage(bitmap, -part.anchor.x, -part.anchor.y);
+
+        // Apply color tint as an overlay if tintIntensity > 0
+        if (applyTint && currentTintIntensity > 0) {
+            const partWidth = bitmap.width;
+            const partHeight = bitmap.height;
+
+            // Create a temporary canvas for the tint effect
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = partWidth;
+            tempCanvas.height = partHeight;
+            const tempCtx = tempCanvas.getContext('2d');
+
+            // Draw the part on the temporary canvas
+            tempCtx.drawImage(bitmap, 0, 0);
+
+            // Apply the tint color with globalCompositeOperation
+            tempCtx.globalCompositeOperation = 'source-atop';
+            tempCtx.globalAlpha = currentTintIntensity;
+            tempCtx.fillStyle = params.tintColor;
+            tempCtx.fillRect(0, 0, partWidth, partHeight);
+
+            // Draw the tinted part back to the main canvas
+            ctx.drawImage(tempCanvas, -part.anchor.x, -part.anchor.y);
+        }
+
         ctx.restore();
     });
 };
@@ -904,7 +927,7 @@ const AnimationPreview = ({ bitmaps, parts, partOrder, animationParams }) => {
     return (
         <div className="bg-gray-900 rounded-lg p-4 flex flex-col items-center justify-center">
             <h3 className="text-lg font-semibold text-gray-300 mb-2 self-start">4. Live Preview</h3>
-            <canvas ref={canvasRef} className="max-w-full max-h-[50vh] object-contain" />
+            <canvas ref={canvasRef} className="max-w-full max-h-[80vh] min-h-[400px] object-contain" />
         </div>
     );
 };
@@ -952,7 +975,7 @@ const AnimationControls = ({ partKey, params, setAnimationParams }) => {
     const handleParamChange = (param, value) => {
         setAnimationParams(prev => ({
             ...prev,
-            [partKey]: { ...prev[partKey], [param]: Number(value) }
+            [partKey]: { ...prev[partKey], [param]: param === 'tintColor' ? value : Number(value) }
         }));
     };
 
@@ -970,6 +993,23 @@ const AnimationControls = ({ partKey, params, setAnimationParams }) => {
         </div>
     );
 
+    const ColorControl = ({ param, label, icon }) => (
+        <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                {icon} {label}
+            </label>
+            <div className="flex items-center gap-2">
+                <input
+                    type="color"
+                    value={params[param]}
+                    onChange={(e) => handleParamChange(param, e.target.value)}
+                    className="w-10 h-10 rounded cursor-pointer border border-gray-600"
+                />
+                <span className="text-sm text-gray-300">{params[param]}</span>
+            </div>
+        </div>
+    );
+
     return (
         <div className="bg-gray-900/50 p-4 rounded-lg">
             <h3 className="text-lg font-semibold text-cyan-300 mb-3">3. Animate '{partKey}'</h3>
@@ -980,6 +1020,14 @@ const AnimationControls = ({ partKey, params, setAnimationParams }) => {
                 <Control param="scale" label="Scale" icon={<Zap size={16} />} min="0.5" max="2" step="0.05" />
                 <Control param="speed" label="Speed" icon={<Zap size={16} />} min="1" max="5" step="0.5" />
                 <Control param="offset" label="Phase Offset" icon={<Play className="rotate-180" size={16} />} min="0" max="360" />
+
+                <div className="border-t border-gray-700 pt-4 mt-4">
+                    <h4 className="text-md font-semibold text-cyan-300 mb-3">Color Effects</h4>
+                    <div className="space-y-4">
+                        <ColorControl param="tintColor" label="Tint Color" icon={<Zap size={16} />} />
+                        <Control param="tintIntensity" label="Tint Intensity" icon={<Zap size={16} />} min="0" max="1" step="0.05" />
+                    </div>
+                </div>
             </div>
         </div>
     );
