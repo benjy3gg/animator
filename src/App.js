@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, Scissors, Pin, Play, Wind, RotateCcw, Trash2, PlusCircle, Zap, MousePointer, AlertTriangle, Download, Settings, Copy, Save, GripVertical, ArrowUp, ArrowDown, Film } from 'lucide-react';
+import { Upload, Scissors, Pin, Play, Wind, RotateCcw, Trash2, PlusCircle, Zap, MousePointer, AlertTriangle, Download, Settings, Copy, Save, GripVertical, ArrowUp, ArrowDown, Film, HelpCircle } from 'lucide-react';
 
 const loadScript = (src) => {
     return new Promise((resolve, reject) => {
@@ -31,13 +31,14 @@ const App = () => {
     const [bitmaps, setBitmaps] = useState({});
     const [animationParams, setAnimationParams] = useState({});
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
     const [isRendering, setIsRendering] = useState(false);
     const [isLoadingDefaults, setIsLoadingDefaults] = useState(true);
 
     useEffect(() => {
         loadScript('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js')
             .catch(err => console.error(err));
-        
+
         // Fetch default data on initial load from URLs
         const fetchDefaults = async () => {
             try {
@@ -54,7 +55,7 @@ const App = () => {
                 const imageBase64 = await imageRes.text();
 
                 const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder } = configJson;
-                
+
                 if (newParts && newAnimParams && newPartOrder) {
                     const img = new Image();
                     img.onload = () => {
@@ -105,7 +106,7 @@ const App = () => {
                 coreMaskCanvas.width = width;
                 coreMaskCanvas.height = height;
                 const coreMaskCtx = coreMaskCanvas.getContext('2d');
-                
+
                 part.paths.add.forEach(path => {
                     coreMaskCtx.beginPath();
                     if(path.length > 0) coreMaskCtx.moveTo(path[0].x, path[0].y);
@@ -126,7 +127,7 @@ const App = () => {
                         }
                     }
                 }
-                
+
                 const finalPartMaskCanvas = document.createElement('canvas');
                 finalPartMaskCanvas.width = width;
                 finalPartMaskCanvas.height = height;
@@ -173,7 +174,7 @@ const App = () => {
                 partCtx.globalCompositeOperation = 'destination-in';
                 partCtx.drawImage(finalPartMaskCanvas, 0, 0);
                 newBitmaps[key] = await createImageBitmap(partCanvas);
-                
+
                 masterMaskCtx.drawImage(finalPartMaskCanvas, 0, 0);
             }
 
@@ -210,7 +211,7 @@ const App = () => {
         if (file) {
             // Reset state for the new image
             handleReset();
-            
+
             const reader = new FileReader();
             reader.onload = (event) => {
                 const img = new Image();
@@ -248,7 +249,7 @@ const App = () => {
             console.error(e);
         }
     };
-    
+
     const loadDefaults = async () => {
         try {
             setIsLoadingDefaults(true);
@@ -265,7 +266,7 @@ const App = () => {
             const imageBase64 = await imageRes.text();
 
             const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder } = configJson;
-            
+
             if (newParts && newAnimParams && newPartOrder) {
                 const img = new Image();
                 img.onload = () => {
@@ -291,6 +292,7 @@ const App = () => {
                 <Header 
                     onReset={handleReset} 
                     onOpenModal={() => setIsModalOpen(true)}
+                    onOpenHelpModal={() => setIsHelpModalOpen(true)}
                     isRendering={isRendering}
                     onDownloadGif={(scale) => {
                         if (window.GIF) {
@@ -325,6 +327,11 @@ const App = () => {
                     config={{ parts, animationParams, partOrder }}
                     onClose={() => setIsModalOpen(false)}
                     onLoad={loadConfig}
+                />
+            )}
+            {isHelpModalOpen && (
+                <HelpModal 
+                    onClose={() => setIsHelpModalOpen(false)}
                 />
             )}
         </div>
@@ -382,7 +389,7 @@ const DropdownButton = ({ label, icon, options, disabled }) => {
 };
 
 // Header Component
-const Header = ({ onReset, onOpenModal, onDownloadGif, onDownloadSpritesheet, isRendering }) => {
+const Header = ({ onReset, onOpenModal, onOpenHelpModal, onDownloadGif, onDownloadSpritesheet, isRendering }) => {
     const spritesheetOptions = [
         { label: 'Full Size (1x)', onClick: () => onDownloadSpritesheet(1) },
         { label: 'Half Size (0.5x)', onClick: () => onDownloadSpritesheet(0.5) },
@@ -398,6 +405,9 @@ const Header = ({ onReset, onOpenModal, onDownloadGif, onDownloadSpritesheet, is
         <div className="flex flex-wrap justify-between items-center border-b border-gray-700 pb-4 gap-4">
             <h1 className="text-2xl md:text-3xl font-bold text-cyan-400 tracking-wider">Advanced Sprite Animator</h1>
             <div className="flex items-center gap-2">
+                <button onClick={onOpenHelpModal} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 transition-colors text-white font-semibold py-2 px-4 rounded-lg shadow-md">
+                    <HelpCircle size={18} /> Help
+                </button>
                 <button onClick={onOpenModal} className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 transition-colors text-white font-semibold py-2 px-4 rounded-lg shadow-md">
                     <Settings size={18} /> Manage Config
                 </button>
@@ -451,7 +461,7 @@ const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChang
 
         const newParts = { ...parts, [trimmedName]: { paths: { add: [] }, anchor: null, boundingBox: null } };
         const newAnimParams = { ...animationParams, [trimmedName]: { rotation: 0, moveX: 0, moveY: 0, scale: 1, speed: 1, offset: 0 } };
-        
+
         onPartsChange(newParts);
         setAnimationParams(newAnimParams);
         setPartOrder([...partOrder, trimmedName]);
@@ -461,11 +471,11 @@ const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChang
     const deletePart = (name) => {
         const { [name]: _, ...remainingParts } = parts;
         const { [name]: __, ...remainingParams } = animationParams;
-        
+
         onPartsChange(remainingParts);
         setAnimationParams(remainingParams);
         setPartOrder(partOrder.filter(p => p !== name));
-        
+
         if (activePart === name) {
             setActivePart(partOrder.filter(p => p !== name)[0] || null);
         }
@@ -648,7 +658,7 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
             maxX = Math.max(maxX, p.x);
             maxY = Math.max(maxY, p.y);
         }));
-        
+
         const boundingBox = (isFinite(minX)) ? { x: minX, y: minY, width: maxX - minX, height: maxY - minY } : null;
         const anchor = boundingBox ? { x: minX + boundingBox.width / 2, y: minY + boundingBox.height / 2 } : {x:0, y:0};
 
@@ -656,13 +666,13 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
         setCurrentPath([]);
         setCursorPos(prev => ({...prev, visible: false}));
     };
-    
+
     // Touch event handlers
     const handleTouchStart = (e) => {
         if (!activePart) return;
         e.preventDefault();
         touchStartPos.current = getCanvasPos(e);
-        
+
         longPressTimer.current = setTimeout(() => {
             // Long press detected: set anchor and cancel drawing
             const updatedPart = { ...parts[activePart], anchor: touchStartPos.current };
@@ -717,7 +727,7 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
                 ctx.fill();
             });
             ctx.globalAlpha = 1.0;
-            
+
             if (part.anchor) {
                 const params = animationParams[activePart];
                 if (params) {
@@ -1050,7 +1060,7 @@ const generateGif = async (bitmaps, parts, animationParams, partOrder, setIsRend
         tempCanvas.width = bitmaps.staticBody.width;
         tempCanvas.height = bitmaps.staticBody.height;
         const tempCtx = tempCanvas.getContext('2d');
-        
+
         const DURATION = 2000; 
         const FPS = 25;
         const FRAME_DELAY = 1000 / FPS;
@@ -1059,7 +1069,7 @@ const generateGif = async (bitmaps, parts, animationParams, partOrder, setIsRend
         for (let i = 0; i < TOTAL_FRAMES; i++) {
             const time = i * FRAME_DELAY;
             drawFrame(tempCtx, bitmaps, parts, animationParams, partOrder, time);
-            
+
             if (scale !== 1) {
                 const scaledCanvas = document.createElement('canvas');
                 scaledCanvas.width = tempCanvas.width * scale;
@@ -1132,10 +1142,10 @@ const generateSpritesheet = (bitmaps, parts, animationParams, partOrder, setIsRe
     for (let i = 0; i < totalFrames; i++) {
         const time = (DURATION / (totalFrames - 1)) * i; // Ensure the last frame is at the end of the duration
         drawFrame(tempCtx, bitmaps, parts, animationParams, partOrder, time);
-        
+
         const col = i % cols;
         const row = Math.floor(i / cols);
-        
+
         sheetCtx.drawImage(tempCanvas, col * scaledWidth, row * scaledHeight, scaledWidth, scaledHeight);
     }
 
@@ -1150,6 +1160,73 @@ const generateSpritesheet = (bitmaps, parts, animationParams, partOrder, setIsRe
     setIsRendering(false);
 };
 
+
+// HelpModal Component
+const HelpModal = ({ onClose }) => {
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl flex flex-col">
+                <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+                    <h2 className="text-xl font-bold text-cyan-400">How to Create an Animation</h2>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white">&times;</button>
+                </div>
+                <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
+                    <div className="space-y-4">
+                        <div className="bg-gray-900 p-4 rounded-lg">
+                            <h3 className="text-lg font-semibold text-cyan-300 mb-2">Step 1: Start Fresh</h3>
+                            <p className="text-gray-300">Click the <span className="bg-red-500 text-white px-2 py-1 rounded">Reset</span> button to clear any existing work and start with a blank canvas.</p>
+                        </div>
+
+                        <div className="bg-gray-900 p-4 rounded-lg">
+                            <h3 className="text-lg font-semibold text-cyan-300 mb-2">Step 2: Load Your Image</h3>
+                            <p className="text-gray-300">Upload a PNG image with transparency for best results. This will be the base for your animation.</p>
+                            <p className="text-gray-400 mt-2 text-sm">Tip: Use images with clear, distinct parts that you want to animate separately.</p>
+                        </div>
+
+                        <div className="bg-gray-900 p-4 rounded-lg">
+                            <h3 className="text-lg font-semibold text-cyan-300 mb-2">Step 3: Create Body Parts</h3>
+                            <p className="text-gray-300">Enter a name for each body part you want to animate (e.g., "HEAD", "ARM", "LEG") and click the <span className="bg-cyan-600 text-white px-2 py-1 rounded">+</span> button or press Enter.</p>
+                            <p className="text-gray-400 mt-2 text-sm">Each part will be independently animatable. Create as many as you need.</p>
+                        </div>
+
+                        <div className="bg-gray-900 p-4 rounded-lg">
+                            <h3 className="text-lg font-semibold text-cyan-300 mb-2">Step 4: Define Part Boundaries</h3>
+                            <p className="text-gray-300">In the Editor, select a part from the list and draw around the area you want to include in that part.</p>
+                            <p className="text-gray-400 mt-2 text-sm">Hold Alt and click to set the anchor point (rotation center) for the selected part. On mobile, use a long press.</p>
+                        </div>
+
+                        <div className="bg-gray-900 p-4 rounded-lg">
+                            <h3 className="text-lg font-semibold text-cyan-300 mb-2">Step 5: Animate Your Parts</h3>
+                            <p className="text-gray-300">Use the sliders in the Animation Controls section to set how each part moves:</p>
+                            <ul className="list-disc pl-5 text-gray-300 mt-2 space-y-1">
+                                <li>Rotation: How much the part rotates</li>
+                                <li>Horizontal/Vertical Move: How far the part moves in each direction</li>
+                                <li>Scale: How much the part grows and shrinks</li>
+                                <li>Speed: How fast the animation cycles</li>
+                                <li>Phase Offset: Timing offset relative to other parts</li>
+                            </ul>
+                        </div>
+
+                        <div className="bg-gray-900 p-4 rounded-lg">
+                            <h3 className="text-lg font-semibold text-cyan-300 mb-2">Step 6: Export Your Animation</h3>
+                            <p className="text-gray-300">When you're happy with your animation, you can:</p>
+                            <ul className="list-disc pl-5 text-gray-300 mt-2 space-y-1">
+                                <li>Download as a Spritesheet (recommended)</li>
+                                <li>Download as a GIF (experimental)</li>
+                            </ul>
+                            <p className="text-gray-400 mt-2 text-sm">Note: The GIF export feature is still in development and may not work perfectly yet.</p>
+                        </div>
+                    </div>
+                </div>
+                <div className="p-4 border-t border-gray-700 flex justify-end">
+                    <button onClick={onClose} className="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2 px-4 rounded-lg">
+                        Got it!
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const Footer = () => (
     <p className="text-center text-sm text-gray-500 mt-6">Created with React & Tailwind CSS.</p>
