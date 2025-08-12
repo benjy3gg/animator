@@ -21,3 +21,8 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+serve.py
+server_instructions.md
+
+/.idea
