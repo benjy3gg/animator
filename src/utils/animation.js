@@ -1,13 +1,104 @@
+// Helper function to calculate distance between two points
+const distance = (p1, p2) => {
+    return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+};
+
+// Helper function to create uniformly spaced vertices along a path
+const createUniformVertices = (path, spacing = 20) => {
+    if (!path || path.length < 2) return path;
+
+    let totalLength = 0;
+    for (let i = 1; i < path.length; i++) {
+        totalLength += distance(path[i-1], path[i]);
+    }
+
+    const numVertices = Math.max(4, Math.ceil(totalLength / spacing));
+    const uniformVertices = [];
+    const segmentLength = totalLength / (numVertices - 1);
+
+    uniformVertices.push(path[0]);
+
+    let currentDist = 0;
+    let currentSegment = 0;
+    let remainingDist = segmentLength;
+
+    for (let i = 1; i < path.length; i++) {
+        const segDist = distance(path[i-1], path[i]);
+
+        while (segDist > remainingDist && currentSegment < numVertices - 2) {
+            const ratio = remainingDist / segDist;
+            const newX = path[i-1].x + ratio * (path[i].x - path[i-1].x);
+            const newY = path[i-1].y + ratio * (path[i].y - path[i-1].y);
+
+            uniformVertices.push({ x: newX, y: newY });
+            currentSegment++;
+
+            currentDist += remainingDist;
+            remainingDist = segmentLength;
+        }
+
+        remainingDist -= segDist;
+        currentDist += segDist;
+    }
+
+    uniformVertices.push(path[path.length - 1]);
+
+    return uniformVertices;
+};
+
+// Helper function to create a convex hull from a set of points using the Monotone Chain algorithm
+const createConvexHull = (points) => {
+    // Need at least 3 points to form a hull
+    if (points.length <= 3) {
+        // For 3 or fewer points, sorting by angle is sufficient and simpler.
+        const center = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+        center.x /= points.length;
+        center.y /= points.length;
+        return [...points].sort((a, b) => {
+            const angleA = Math.atan2(a.y - center.y, a.x - center.x);
+            const angleB = Math.atan2(b.y - center.y, b.x - center.x);
+            return angleA - angleB;
+        });
+    }
+
+    // Sort points lexicographically (by x, then y) to find the start and end points of the hull
+    points.sort((a, b) => a.x - b.x || a.y - b.y);
+
+    const crossProduct = (o, a, b) => {
+        return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    };
+
+    // Build the lower hull
+    const lower = [];
+    for (const p of points) {
+        while (lower.length >= 2 && crossProduct(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+            lower.pop();
+        }
+        lower.push(p);
+    }
+
+    // Build the upper hull
+    const upper = [];
+    for (let i = points.length - 1; i >= 0; i--) {
+        const p = points[i];
+        while (upper.length >= 2 && crossProduct(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+            upper.pop();
+        }
+        upper.push(p);
+    }
+
+    // Concatenate the lower and upper hulls, removing duplicate start/end points
+    return lower.slice(0, -1).concat(upper.slice(0, -1));
+};
+        
 // Animation drawing logic
 export const drawFrame = (ctx, bitmaps, parts, animationParams, partOrder, time, globalSeams = []) => {
     const ANIMATION_DURATION = 2000; // 2 seconds
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     if(bitmaps.staticBody) ctx.drawImage(bitmaps.staticBody, 0, 0);
 
-    // Store transformed part data for seam detection
     const transformedParts = [];
 
-    // First pass: Calculate transformed positions for all parts
     [...partOrder].reverse().forEach(key => {
         const part = parts[key];
         const bitmap = bitmaps[key];
@@ -20,7 +111,6 @@ export const drawFrame = (ctx, bitmaps, parts, animationParams, partOrder, time,
         const currentMoveY = params.moveY * cycle;
         const currentScale = 1 + (params.scale - 1) * Math.abs(cycle);
 
-        // Store transformed part data
         transformedParts.push({
             key,
             part,
@@ -36,62 +126,124 @@ export const drawFrame = (ctx, bitmaps, parts, animationParams, partOrder, time,
         });
     });
 
-    // Second pass: Draw lines between corresponding seam pixels using global seams
+    const allTransformedVertices = [];
+    const allOriginalVerticesWithBitmaps = [];
+    transformedParts.forEach(({ part, bitmap, transform }) => {
+        if (part.selectedVertices && part.selectedVertices.length > 0) {
+            const vertexPoints = part.selectedVertices.map(v => {
+                const path = v.pathType === 'add' 
+                    ? part.paths.add[v.pathIndex] 
+                    : part.paths.subtract[v.pathIndex];
+                if (!path) return null;
+                const uniformVertices = createUniformVertices(path);
+                return uniformVertices[v.vertexIndex];
+            }).filter(Boolean);
+
+            vertexPoints.forEach(vertex => {
+                allOriginalVerticesWithBitmaps.push({ vertex, bitmap });
+            });
+
+            const transformedVertexPoints = transformPoints(vertexPoints, transform, part.anchor);
+            allTransformedVertices.push(...transformedVertexPoints);
+        }
+    });
+
+    if (allTransformedVertices.length >= 3) {
+        const parseRgba = (rgba) => {
+            const match = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)/);
+            if (!match) return { r: 0, g: 0, b: 0, a: 0 };
+            return {
+                r: parseInt(match[1], 10),
+                g: parseInt(match[2], 10),
+                b: parseInt(match[3], 10),
+                a: match[4] ? parseFloat(match[4]) : 1
+            };
+        };
+
+        let totalR = 0, totalG = 0, totalB = 0, totalA = 0;
+        allOriginalVerticesWithBitmaps.forEach(({ vertex, bitmap }) => {
+            const colorString = getColorAtPixel(bitmap, vertex.x, vertex.y);
+            const color = parseRgba(colorString);
+            totalR += color.r;
+            totalG += color.g;
+            totalB += color.b;
+            totalA += color.a;
+        });
+
+        const numVertices = allOriginalVerticesWithBitmaps.length;
+        const avgR = Math.floor(totalR / numVertices);
+        const avgG = Math.floor(totalG / numVertices);
+        const avgB = Math.floor(totalB / numVertices);
+        const avgA = totalA / numVertices;
+
+        const averageColor = `rgba(${avgR}, ${avgG}, ${avgB}, ${avgA})`;
+
+        const hullVertices = createConvexHull([...allTransformedVertices]);
+
+        if (hullVertices.length >= 3) {
+            const center = hullVertices.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+            center.x /= hullVertices.length;
+            center.y /= hullVertices.length;
+
+            const scaleFactor = 1.1;
+            const scaledHullVertices = hullVertices.map(p => ({
+                x: center.x + (p.x - center.x) * scaleFactor,
+                y: center.y + (p.y - center.y) * scaleFactor
+            }));
+
+            ctx.fillStyle = 'red';
+            ctx.beginPath();
+            ctx.moveTo(scaledHullVertices[0].x, scaledHullVertices[0].y);
+            for (let i = 1; i < scaledHullVertices.length; i++) {
+                ctx.lineTo(scaledHullVertices[i].x, scaledHullVertices[i].y);
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+
     if (false && globalSeams && globalSeams.length > 0) {
-        // Iterate directly over all globalSeams
         globalSeams.forEach(seam => {
-            // Only process seams where partKey is an array and contains exactly 2 entries
             if (Array.isArray(seam.partKey) && seam.partKey.length === 2) {
-                // Find the transformed parts for each entry in the partKey array
                 const partAKey = seam.partKey[0];
                 const partBKey = seam.partKey[1];
 
                 const partA = transformedParts.find(part => part.key === partAKey);
                 const partB = transformedParts.find(part => part.key === partBKey);
 
-                // Skip if either part is not found or doesn't have a bounding box
                 if (!partA || !partB || !partA.part.boundingBox || !partB.part.boundingBox) {
                     return;
                 }
 
-                // Apply transformations to seam pixels
                 const transformedPixelsA = transformPoints(seam.pixels, partA.transform, partA.part.anchor);
                 const transformedPixelsB = transformPoints(seam.pixels, partB.transform, partB.part.anchor);
 
-                // Skip if we don't have enough points
                 if (transformedPixelsA.length < 1 || transformedPixelsB.length < 1) {
                     return;
                 }
 
-                // Draw lines between corresponding points
                 ctx.save();
                 ctx.lineWidth = 20;
                 ctx.globalAlpha = 1.0;
 
-                // Draw a line between each pair of corresponding points
                 for (let i = 0; i < transformedPixelsA.length; i++) {
                     const pointA = transformedPixelsA[i];
                     const pointB = transformedPixelsB[i];
 
-                    // Use pre-stored color if available, otherwise sample from bitmaps
                     let r, g, b, a;
 
                     if (seam.colors && seam.colors[i]) {
-                        // Use the pre-stored color
                         const color = seam.colors[i];
                         r = color.r;
                         g = color.g;
                         b = color.b;
                         a = color.a;
                     } else {
-                        // Fallback to sampling the color (for backward compatibility)
                         const originalPixel = seam.pixels[i];
 
-                        // Sample the color at the exact pixel position from both bitmaps
                         const colorA = getColorAtPixel(partA.bitmap, originalPixel.x, originalPixel.y);
                         const colorB = getColorAtPixel(partB.bitmap, originalPixel.x, originalPixel.y);
 
-                        // Parse the rgba values
                         const parseRgba = (rgba) => {
                             const match = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)/);
                             if (!match) return { r: 0, g: 0, b: 0, a: 0 };
@@ -106,14 +258,12 @@ export const drawFrame = (ctx, bitmaps, parts, animationParams, partOrder, time,
                         const rgbaA = parseRgba(colorA);
                         const rgbaB = parseRgba(colorB);
 
-                        // Calculate average color at this specific pixel
                         r = Math.floor((rgbaA.r + rgbaB.r) / 2);
                         g = Math.floor((rgbaA.g + rgbaB.g) / 2);
                         b = Math.floor((rgbaA.b + rgbaB.b) / 2);
                         a = (rgbaA.a + rgbaB.a) / 2;
                     }
 
-                    // Set the stroke style to the color at this specific pixel
                     ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
 
                     ctx.beginPath();
@@ -127,7 +277,6 @@ export const drawFrame = (ctx, bitmaps, parts, animationParams, partOrder, time,
         });
     }
 
-    // Third pass: Draw the parts as before
     transformedParts.forEach(({ key, part, bitmap, params, transform }) => {
         const applyTint = params.tintIntensity > 0;
         const tintCycle = Math.abs(transform.cycle);
@@ -138,71 +287,56 @@ export const drawFrame = (ctx, bitmaps, parts, animationParams, partOrder, time,
         ctx.rotate(transform.rotation);
         ctx.scale(transform.scale, transform.scale);
 
-        // Draw the part
         ctx.drawImage(bitmap, -part.anchor.x, -part.anchor.y);
 
-        // Apply color tint as an overlay if tintIntensity > 0
         if (applyTint && currentTintIntensity > 0) {
             const partWidth = bitmap.width;
             const partHeight = bitmap.height;
 
-            // Create a temporary canvas for the tint effect
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = partWidth;
             tempCanvas.height = partHeight;
             const tempCtx = tempCanvas.getContext('2d');
 
-            // Draw the part on the temporary canvas
             tempCtx.drawImage(bitmap, 0, 0);
 
-            // Apply the tint color with globalCompositeOperation
             tempCtx.globalCompositeOperation = 'source-atop';
             tempCtx.globalAlpha = currentTintIntensity;
             tempCtx.fillStyle = params.tintColor;
             tempCtx.fillRect(0, 0, partWidth, partHeight);
 
-            // Draw the tinted part back to the main canvas
             ctx.drawImage(tempCanvas, -part.anchor.x, -part.anchor.y);
         }
 
         ctx.restore();
     });
+
 };
 
-// Function to get the color at a specific pixel position
 export const getColorAtPixel = (bitmap, x, y) => {
-    // Create a temporary canvas to sample colors
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = bitmap.width;
     tempCanvas.height = bitmap.height;
     const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
 
-    // Draw the bitmap on the canvas
     tempCtx.drawImage(bitmap, 0, 0);
 
-    // Ensure coordinates are within bounds
     const safeX = Math.max(0, Math.min(bitmap.width - 1, Math.floor(x)));
     const safeY = Math.max(0, Math.min(bitmap.height - 1, Math.floor(y)));
 
-    // Get the pixel data at the specified position
     const data = tempCtx.getImageData(safeX, safeY, 1, 1).data;
 
-    // Return the color as an rgba string
     return `rgba(${data[0]}, ${data[1]}, ${data[2]}, ${data[3] / 255})`;
 };
 
-// Function to find a seam between two parts
 export const findSeamBetweenParts = (partA, partB) => {
-    // Get the paths from both parts
     const pathsA = partA.part.paths.add;
     const pathsB = partB.part.paths.add;
 
-    // Find the closest points between the two parts' paths
     let minDistance = Infinity;
     let closestPointsA = [];
     let closestPointsB = [];
 
-    // Check if bounding boxes are close to each other (optimization)
     const boxA = partA.part.boundingBox;
     const boxB = partB.part.boundingBox;
 
@@ -213,37 +347,27 @@ export const findSeamBetweenParts = (partA, partB) => {
         Math.abs(boxB.y - (boxA.y + boxA.height))
     );
 
-    // If bounding boxes are too far apart, skip detailed analysis
     if (boxDistance > 30) {
         return null;
     }
 
-    // For each path in part A
     pathsA.forEach(pathA => {
-        // For each path in part B
         pathsB.forEach(pathB => {
-            // Sample points from paths to reduce computation
-            // For longer paths, we don't need to check every point
             const sampleRateA = Math.max(1, Math.floor(pathA.length / 20));
             const sampleRateB = Math.max(1, Math.floor(pathB.length / 20));
 
-            // For each point in path A (sampled)
             for (let i = 0; i < pathA.length; i += sampleRateA) {
                 const pointA = pathA[i];
 
-                // For each point in path B (sampled)
                 for (let j = 0; j < pathB.length; j += sampleRateB) {
                     const pointB = pathB[j];
 
-                    // Calculate distance between points
                     const distance = Math.sqrt(
-                        Math.pow(pointA.x - pointB.x, 2) + 
+                        Math.pow(pointA.x - pointB.x, 2) +
                         Math.pow(pointA.y - pointB.y, 2)
                     );
 
-                    // If points are close (within 20 pixels), consider them part of a seam
                     if (distance < 20) {
-                        // Store these points as potential seam points
                         closestPointsA.push({
                             point: pointA,
                             pathIndex: i,
@@ -265,36 +389,29 @@ export const findSeamBetweenParts = (partA, partB) => {
         });
     });
 
-    // If we found close points, create a seam
     if (closestPointsA.length > 0 && closestPointsB.length > 0) {
-        // Sort points to create a continuous seam
         const seamPoints = [];
 
-        // Add unique points to avoid duplicates
         const addedPoints = new Set();
 
-        // First add points from part A
         closestPointsA.forEach(({ point }) => {
             const key = `${Math.round(point.x)},${Math.round(point.y)}`;
             if (!addedPoints.has(key)) {
-                seamPoints.push({...point}); // Clone to avoid reference issues
+                seamPoints.push({...point});
                 addedPoints.add(key);
             }
         });
 
-        // Then add points from part B
         closestPointsB.forEach(({ point }) => {
             const key = `${Math.round(point.x)},${Math.round(point.y)}`;
             if (!addedPoints.has(key)) {
-                seamPoints.push({...point}); // Clone to avoid reference issues
+                seamPoints.push({...point});
                 addedPoints.add(key);
             }
         });
 
-        // If we have at least 2 points, we can create a seam
         if (seamPoints.length >= 2) {
             try {
-                // Sample the color at the seam from the original image
                 const seamColor = getAverageColor(partA.bitmap, partB.bitmap);
 
                 return {
@@ -311,16 +428,13 @@ export const findSeamBetweenParts = (partA, partB) => {
     return null;
 };
 
-// Function to get the average color between two bitmaps
 export const getAverageColor = (bitmapA, bitmapB) => {
-    // Create a temporary canvas to sample colors
     const tempCanvas = document.createElement('canvas');
     const size = 1;
     tempCanvas.width = size;
     tempCanvas.height = size;
     const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
 
-    // Draw a small portion of each bitmap
     tempCtx.drawImage(bitmapA, 0, 0, bitmapA.width, bitmapA.height, 0, 0, size, size);
     const dataA = tempCtx.getImageData(0, 0, 1, 1).data;
 
@@ -328,7 +442,6 @@ export const getAverageColor = (bitmapA, bitmapB) => {
     tempCtx.drawImage(bitmapB, 0, 0, bitmapB.width, bitmapB.height, 0, 0, size, size);
     const dataB = tempCtx.getImageData(0, 0, 1, 1).data;
 
-    // Calculate average color
     const r = Math.floor((dataA[0] + dataB[0]) / 2);
     const g = Math.floor((dataA[1] + dataB[1]) / 2);
     const b = Math.floor((dataA[2] + dataB[2]) / 2);
@@ -337,22 +450,16 @@ export const getAverageColor = (bitmapA, bitmapB) => {
     return `rgba(${r}, ${g}, ${b}, ${a})`;
 };
 
-// Function to draw a patch between two parts (legacy)
 export const drawSeamPatch = (ctx, seam, partA, partB) => {
     try {
-        // Apply transformations to seam points based on part transformations
         const transformedPointsA = transformPoints(seam.points, partA.transform, partA.part.anchor);
         const transformedPointsB = transformPoints(seam.points, partB.transform, partB.part.anchor);
 
-        // Skip if we don't have enough points
         if (transformedPointsA.length < 2 || transformedPointsB.length < 2) {
             return;
         }
 
-        // Sort points to create a more natural polygon
-        // We'll sort points by their angle from the center to create a convex hull-like shape
         const sortPointsByAngle = (points) => {
-            // Calculate center point
             const center = points.reduce(
                 (acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }),
                 { x: 0, y: 0 }
@@ -360,7 +467,6 @@ export const drawSeamPatch = (ctx, seam, partA, partB) => {
             center.x /= points.length;
             center.y /= points.length;
 
-            // Sort points by angle
             return [...points].sort((a, b) => {
                 const angleA = Math.atan2(a.y - center.y, a.x - center.x);
                 const angleB = Math.atan2(b.y - center.y, b.x - center.x);
@@ -368,30 +474,23 @@ export const drawSeamPatch = (ctx, seam, partA, partB) => {
             });
         };
 
-        // Create a combined set of points and sort them
         const allPoints = [...transformedPointsA, ...transformedPointsB];
         const sortedPoints = sortPointsByAngle(allPoints);
 
-        // Draw a polygon connecting the transformed points
         ctx.save();
         ctx.beginPath();
 
-        // Start with the first point
         if (sortedPoints.length > 0) {
             ctx.moveTo(sortedPoints[0].x, sortedPoints[0].y);
 
-            // Draw lines through all sorted points
             for (let i = 1; i < sortedPoints.length; i++) {
                 ctx.lineTo(sortedPoints[i].x, sortedPoints[i].y);
             }
 
-            // Close the path
             ctx.closePath();
 
-            // Fill with the seam color
             ctx.fillStyle = seam.color;
 
-            // Use a slight blur for smoother edges
             ctx.shadowColor = seam.color;
             ctx.shadowBlur = 2;
 
@@ -404,39 +503,31 @@ export const drawSeamPatch = (ctx, seam, partA, partB) => {
     }
 };
 
-
-// Function to transform points based on part transformation
 export const transformPoints = (points, transform, anchor) => {
     if (!points || !points.length || !transform || !anchor) {
         return [];
     }
 
-    // Cache trigonometric calculations for better performance
     const cos = Math.cos(transform.rotation);
     const sin = Math.sin(transform.rotation);
 
     return points.map(point => {
         try {
-            // Calculate point relative to anchor
             const relX = point.x - anchor.x;
             const relY = point.y - anchor.y;
 
-            // Apply rotation
             const rotatedX = relX * cos - relY * sin;
             const rotatedY = relX * sin + relY * cos;
 
-            // Apply scale
             const scaledX = rotatedX * transform.scale;
             const scaledY = rotatedY * transform.scale;
 
-            // Apply translation and return
             return {
                 x: scaledX + transform.x,
                 y: scaledY + transform.y
             };
         } catch (error) {
             console.error("Error transforming point:", error, point);
-            // Return a safe default if transformation fails
             return { x: transform.x, y: transform.y };
         }
     });

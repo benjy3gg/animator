@@ -2,6 +2,64 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import Magnifier from './Magnifier';
 
+// Function to calculate distance between two points
+const distance = (p1, p2) => {
+    return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+};
+
+// Function to create uniformly spaced vertices along a path
+const createUniformVertices = (path, spacing = 20) => {
+    if (!path || path.length < 2) return path;
+
+    // Calculate the total length of the path
+    let totalLength = 0;
+    for (let i = 1; i < path.length; i++) {
+        totalLength += distance(path[i-1], path[i]);
+    }
+
+    // Calculate how many vertices we need
+    const numVertices = Math.max(4, Math.ceil(totalLength / spacing));
+
+    // Create uniformly spaced vertices
+    const uniformVertices = [];
+    const segmentLength = totalLength / (numVertices - 1);
+
+    // Add the first point
+    uniformVertices.push(path[0]);
+
+    let currentDist = 0;
+    let currentSegment = 0;
+    let remainingDist = segmentLength;
+
+    for (let i = 1; i < path.length; i++) {
+        const segDist = distance(path[i-1], path[i]);
+
+        // If this segment is longer than what we need for the next vertex
+        while (segDist > remainingDist && currentSegment < numVertices - 2) {
+            // Calculate the position of the new vertex
+            const ratio = remainingDist / segDist;
+            const newX = path[i-1].x + ratio * (path[i].x - path[i-1].x);
+            const newY = path[i-1].y + ratio * (path[i].y - path[i-1].y);
+
+            uniformVertices.push({ x: newX, y: newY });
+            currentSegment++;
+
+            // Update remaining distance for the next vertex
+            currentDist += remainingDist;
+            remainingDist = segmentLength;
+        }
+
+        // Update remaining distance for the next segment
+        remainingDist -= segDist;
+        currentDist += segDist;
+    }
+
+    // Add the last point
+    uniformVertices.push(path[path.length - 1]);
+
+    return uniformVertices;
+};
+
 const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams, globalSeams, setGlobalSeams }) => {
     const canvasRef = useRef(null);
     const [isDrawing, setIsDrawing] = useState(false);
@@ -40,10 +98,6 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
             return;
         }
 
-        console.log(currentPath)
-
-
-
         // Normal path (no shift): update part selection
         const newPaths = { add: [currentPath], subtract: [] };
 
@@ -70,7 +124,29 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
         // By default, no seams are created when not using shift
         const seamPixels = parts[activePart]?.seamPixels || [];
 
-        onPartsChange({ ...parts, [activePart]: { paths: newPaths, anchor, boundingBox, seamPixels } });
+        // Create a new parts object with the updated part
+        const updatedParts = { ...parts, [activePart]: { paths: newPaths, anchor, boundingBox, seamPixels } };
+
+        // If this is not the "whole" part, subtract it from the "whole" part
+        if (activePart !== "whole" && parts["whole"]) {
+            // Get the whole part
+            const wholePart = parts["whole"];
+
+            // Add the current path to the whole part's subtract paths
+            const updatedWholePart = {
+                ...wholePart,
+                paths: {
+                    add: [...wholePart.paths.add],
+                    subtract: [...(wholePart.paths.subtract || []), currentPath]
+                }
+            };
+
+            // Update the whole part in the parts object
+            updatedParts["whole"] = updatedWholePart;
+        }
+
+        // Update all parts
+        onPartsChange(updatedParts);
         setCurrentPath([]);
         setIsDrawing(false);
     }, [activePart, currentPath, parts, onPartsChange, setCurrentPath, setIsDrawing, setCursorPos, isShiftPressed]);
@@ -211,14 +287,22 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
         if (parts[activePart]) {
             const part = parts[activePart];
 
+            // Create an offscreen canvas for drawing the part with proper masking
+            const offscreenCanvas = document.createElement('canvas');
+            offscreenCanvas.width = canvas.width;
+            offscreenCanvas.height = canvas.height;
+            const offscreenCtx = offscreenCanvas.getContext('2d');
+
             // Draw the part with orange fill
-            ctx.globalAlpha = 0.4;
-            ctx.fillStyle = 'orange';
+            offscreenCtx.globalAlpha = 0.4;
+            offscreenCtx.fillStyle = 'orange';
+
+            // Draw all add paths
             part.paths.add.forEach(path => {
-                ctx.beginPath();
-                if(path.length > 0) ctx.moveTo(path[0].x, path[0].y);
+                offscreenCtx.beginPath();
+                if(path.length > 0) offscreenCtx.moveTo(path[0].x, path[0].y);
                 path.forEach((p, i) => {
-                    i !== 0 && ctx.lineTo(p.x, p.y)
+                    i !== 0 && offscreenCtx.lineTo(p.x, p.y)
 
                     const colorData = ctx.getImageData(p.x, p.y, 1,1).data;
                     if(colorData[3] > 0) {
@@ -281,10 +365,29 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
                         }
                     };
                 });
-                ctx.fillStyle = 'orange';
-                ctx.closePath();
-                ctx.fill();
+                offscreenCtx.closePath();
+                offscreenCtx.fill();
             });
+
+            // Draw all subtract paths using destination-out composite operation
+            if (part.paths.subtract && part.paths.subtract.length > 0) {
+                offscreenCtx.globalCompositeOperation = 'destination-out';
+                part.paths.subtract.forEach(path => {
+                    if (path.length > 0) {
+                        offscreenCtx.beginPath();
+                        offscreenCtx.moveTo(path[0].x, path[0].y);
+                        path.forEach((p, i) => {
+                            i !== 0 && offscreenCtx.lineTo(p.x, p.y);
+                        });
+                        offscreenCtx.closePath();
+                        offscreenCtx.fill();
+                    }
+                });
+                offscreenCtx.globalCompositeOperation = 'source-over';
+            }
+
+            // Draw the offscreen canvas onto the main canvas
+            ctx.drawImage(offscreenCanvas, 0, 0);
 
             // Draw global seam pixels for this part in green if they exist
             const partSeams = globalSeams.filter(seam => Array.isArray(seam.partKey) ? seam.partKey.includes(activePart) : seam.partKey === activePart);
@@ -301,6 +404,52 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
                         pixels.forEach((p, i) => i !== 0 && ctx.lineTo(p.x, p.y));
                         ctx.closePath();
                         ctx.stroke();
+                    }
+                });
+            }
+
+            // Draw vertices on the borders of the part as circles
+            if (part.paths.add.length > 0) {
+                ctx.globalAlpha = 0.8;
+                ctx.fillStyle = '#4299E1'; // Blue color for vertices
+                ctx.strokeStyle = '#1A365D'; // Darker blue for the stroke
+                ctx.lineWidth = 1;
+
+                part.paths.add.forEach(path => {
+                    if (path.length > 0) {
+                        // Create uniformly spaced vertices
+                        const uniformVertices = createUniformVertices(path);
+
+                        // Draw a circle at each vertex point
+                        uniformVertices.forEach(point => {
+                            ctx.beginPath();
+                            ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
+                            ctx.fill();
+                            ctx.stroke();
+                        });
+                    }
+                });
+            }
+
+            // Draw vertices for subtract paths with a different color
+            if (part.paths.subtract && part.paths.subtract.length > 0) {
+                ctx.globalAlpha = 0.8;
+                ctx.fillStyle = '#F87171'; // Red color for subtract vertices
+                ctx.strokeStyle = '#991B1B'; // Darker red for the stroke
+                ctx.lineWidth = 1;
+
+                part.paths.subtract.forEach(path => {
+                    if (path.length > 0) {
+                        // Create uniformly spaced vertices
+                        const uniformVertices = createUniformVertices(path);
+
+                        // Draw a circle at each vertex point
+                        uniformVertices.forEach(point => {
+                            ctx.beginPath();
+                            ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
+                            ctx.fill();
+                            ctx.stroke();
+                        });
                     }
                 });
             }
