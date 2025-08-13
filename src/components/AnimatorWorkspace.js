@@ -4,7 +4,7 @@ import AnimationControls from './AnimationControls';
 import SpriteEditor from './SpriteEditor';
 import AnimationPreview from './AnimationPreview';
 
-const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChange, bitmaps, animationParams, setAnimationParams }) => {
+const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChange, bitmaps, animationParams, setAnimationParams, globalSeams, setGlobalSeams, previewCanvasRef }) => {
     const [activePart, setActivePart] = useState(partOrder[0] || null);
 
     const addPart = (name) => {
@@ -91,12 +91,16 @@ const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChang
                     activePart={activePart}
                     onPartsChange={onPartsChange}
                     animationParams={animationParams}
+                    globalSeams={globalSeams}
+                    setGlobalSeams={setGlobalSeams}
                  />
                  <AnimationPreview 
                     bitmaps={bitmaps}
                     parts={parts}
                     partOrder={partOrder}
                     animationParams={animationParams}
+                    globalSeams={globalSeams}
+                    canvasRef={previewCanvasRef}
                  />
             </div>
         </div>

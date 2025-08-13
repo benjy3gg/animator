@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { loadScript } from './utils/loadScript';
 import { generateGif, generateSpritesheet } from './utils/export';
 import Header from './components/Header';
@@ -17,6 +17,7 @@ const App = () => {
     const [partOrder, setPartOrder] = useState([]);
     const [bitmaps, setBitmaps] = useState({});
     const [animationParams, setAnimationParams] = useState({});
+    const [globalSeams, setGlobalSeams] = useState([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     // Check if user has seen the help modal before
     const [isHelpModalOpen, setIsHelpModalOpen] = useState(() => {
@@ -30,6 +31,7 @@ const App = () => {
     });
     const [isRendering, setIsRendering] = useState(false);
     const [isLoadingDefaults, setIsLoadingDefaults] = useState(true);
+    const previewCanvasRef = useRef(null);
 
     useEffect(() => {
         loadScript('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js')
@@ -50,7 +52,7 @@ const App = () => {
                 const configJson = await configRes.json();
                 const imageBase64 = await imageRes.text();
 
-                const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder } = configJson;
+                const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder, globalSeams: newGlobalSeams } = configJson;
 
                 if (newParts && newAnimParams && newPartOrder) {
                     const img = new Image();
@@ -58,6 +60,10 @@ const App = () => {
                         setImage(img);
                         setAnimationParams(newAnimParams);
                         setPartOrder(newPartOrder);
+                        // Set global seams if they exist in the config
+                        if (newGlobalSeams) {
+                            setGlobalSeams(newGlobalSeams);
+                        }
                         // Important: Set parts state and then let useEffect trigger bitmap update
                         setParts(newParts); 
                     };
@@ -169,16 +175,21 @@ const App = () => {
         setBitmaps({});
         setAnimationParams({});
         setPartOrder([]);
+        setGlobalSeams([]);
         setIsLoadingDefaults(false); // Fix: Ensure we show the uploader after reset
     };
 
     const loadConfig = (config) => {
         try {
-            const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder } = JSON.parse(config);
+            const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder, globalSeams: newGlobalSeams } = JSON.parse(config);
             if (newParts && newAnimParams && newPartOrder) {
                 setAnimationParams(newAnimParams);
                 setPartOrder(newPartOrder);
                 setParts(newParts);
+                // Set global seams if they exist in the config
+                if (newGlobalSeams) {
+                    setGlobalSeams(newGlobalSeams);
+                }
                 setIsModalOpen(false);
             } else {
                 alert("Invalid configuration format.");
@@ -204,7 +215,7 @@ const App = () => {
             const configJson = await configRes.json();
             const imageBase64 = await imageRes.text();
 
-            const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder } = configJson;
+            const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder, globalSeams: newGlobalSeams } = configJson;
 
             if (newParts && newAnimParams && newPartOrder) {
                 const img = new Image();
@@ -212,7 +223,11 @@ const App = () => {
                     setImage(img);
                     setAnimationParams(newAnimParams);
                     setPartOrder(newPartOrder);
-                    setParts(newParts); 
+                    setParts(newParts);
+                    // Set global seams if they exist in the config
+                    if (newGlobalSeams) {
+                        setGlobalSeams(newGlobalSeams);
+                    }
                 };
                 img.src = imageBase64;
             } else {
@@ -256,14 +271,17 @@ const App = () => {
                         bitmaps={bitmaps}
                         animationParams={animationParams}
                         setAnimationParams={setAnimationParams}
+                        globalSeams={globalSeams}
+                        setGlobalSeams={setGlobalSeams}
+                        previewCanvasRef={previewCanvasRef}
                     />
                 )}
             </div>
-            {image && <FloatingPreview bitmaps={bitmaps} parts={parts} partOrder={partOrder} animationParams={animationParams} />}
+            {image && <FloatingPreview bitmaps={bitmaps} parts={parts} partOrder={partOrder} animationParams={animationParams} globalSeams={globalSeams} previewCanvasRef={previewCanvasRef} />}
             <Footer />
             {isModalOpen && (
                 <ConfigModal 
-                    config={{ parts, animationParams, partOrder }}
+                    config={{ parts, animationParams, partOrder, globalSeams }}
                     onClose={() => setIsModalOpen(false)}
                     onLoad={loadConfig}
                 />

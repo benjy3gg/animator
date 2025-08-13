@@ -2,11 +2,12 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import Magnifier from './Magnifier';
 
-const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams }) => {
+const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams, globalSeams, setGlobalSeams }) => {
     const canvasRef = useRef(null);
     const [isDrawing, setIsDrawing] = useState(false);
     const [currentPath, setCurrentPath] = useState([]);
     const [cursorPos, setCursorPos] = useState({ x: 0, y: 0, visible: false });
+    const [isShiftPressed, setIsShiftPressed] = useState(false);
     const longPressTimer = useRef();
     const touchStartPos = useRef({ x: 0, y: 0 });
     const isMouseDownRef = useRef(false);
@@ -19,7 +20,7 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
         const scaleY = canvas.height / rect.height;
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+        return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY};
     };
 
     // Function to finalize the path and create the part - memoized with useCallback
@@ -31,6 +32,19 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
             return;
         }
 
+        // If shift is pressed, we don't modify the part selection
+        // The seams are now collected during drawing in the useEffect
+        if (isShiftPressed) {
+            setCurrentPath([]);
+            setIsDrawing(false);
+            return;
+        }
+
+        console.log(currentPath)
+
+
+
+        // Normal path (no shift): update part selection
         const newPaths = { add: [currentPath], subtract: [] };
 
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -53,10 +67,13 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
             anchor = boundingBox ? { x: minX + boundingBox.width / 2, y: minY + boundingBox.height / 2 } : {x:0, y:0};
         }
 
-        onPartsChange({ ...parts, [activePart]: { paths: newPaths, anchor, boundingBox } });
+        // By default, no seams are created when not using shift
+        const seamPixels = parts[activePart]?.seamPixels || [];
+
+        onPartsChange({ ...parts, [activePart]: { paths: newPaths, anchor, boundingBox, seamPixels } });
         setCurrentPath([]);
         setIsDrawing(false);
-    }, [activePart, currentPath, parts, onPartsChange, setCurrentPath, setIsDrawing, setCursorPos]);
+    }, [activePart, currentPath, parts, onPartsChange, setCurrentPath, setIsDrawing, setCursorPos, isShiftPressed]);
 
     // Add global mouse event listeners
     useEffect(() => {
@@ -75,6 +92,29 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
             window.removeEventListener('mouseup', handleGlobalMouseUp);
         };
     }, [isDrawing, finalizePath]);
+
+    // Add keyboard event listeners for shift key
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Shift') {
+                setIsShiftPressed(true);
+            }
+        };
+
+        const handleKeyUp = (e) => {
+            if (e.key === 'Shift') {
+                setIsShiftPressed(false);
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+        };
+    }, []);
 
     const handleMouseDown = (e) => {
         if (!activePart) return;
@@ -141,7 +181,7 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
     const handleTouchMove = (e) => {
         e.preventDefault();
         const currentPos = getCanvasPos(e);
-        setCursorPos({ x: currentPos.x, y: currentPos.y, visible: true });
+        setCursorPos({ x: currentPos.x, y: currentPos.y, visible: true, color: currentPos.color});
 
         // If finger moves too far, cancel the long press timer
         const dist = Math.hypot(currentPos.x - touchStartPos.current.x, currentPos.y - touchStartPos.current.y);
@@ -170,15 +210,101 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
 
         if (parts[activePart]) {
             const part = parts[activePart];
+
+            // Draw the part with orange fill
             ctx.globalAlpha = 0.4;
             ctx.fillStyle = 'orange';
             part.paths.add.forEach(path => {
                 ctx.beginPath();
                 if(path.length > 0) ctx.moveTo(path[0].x, path[0].y);
-                path.forEach((p, i) => i !== 0 && ctx.lineTo(p.x, p.y));
+                path.forEach((p, i) => {
+                    i !== 0 && ctx.lineTo(p.x, p.y)
+
+                    const colorData = ctx.getImageData(p.x, p.y, 1,1).data;
+                    if(colorData[3] > 0) {
+                        // Create a color object with RGBA values
+                        const color = {
+                            r: colorData[0],
+                            g: colorData[1],
+                            b: colorData[2],
+                            a: colorData[3] / 255
+                        };
+
+                        // Check if this pixel is already part of an existing seam
+                        const existingSeamIndex = globalSeams.findIndex(seam => 
+                            seam.pixels.some(pixel => 
+                                Math.abs(pixel.x - p.x) < 5 && Math.abs(pixel.y - p.y) < 5
+                            )
+                        );
+
+                        if (existingSeamIndex !== -1) {
+                            // If this pixel is close to an existing seam, add this part to that seam's partKey array
+                            const existingSeam = globalSeams[existingSeamIndex];
+                            if (!existingSeam.partKey.includes(activePart)) {
+                                existingSeam.partKey.push(activePart);
+                            }
+
+                            // Find the index of the pixel in the existing seam
+                            const pixelIndex = existingSeam.pixels.findIndex(pixel => 
+                                Math.abs(pixel.x - p.x) < 5 && Math.abs(pixel.y - p.y) < 5
+                            );
+
+                            // If the pixel is found, update its color
+                            if (pixelIndex !== -1) {
+                                // Initialize colors array if it doesn't exist
+                                if (!existingSeam.colors) {
+                                    existingSeam.colors = [];
+                                }
+
+                                // Ensure the colors array is at least as long as the pixels array
+                                while (existingSeam.colors.length < existingSeam.pixels.length) {
+                                    existingSeam.colors.push(null);
+                                }
+
+                                // Update the color at the pixel index
+                                existingSeam.colors[pixelIndex] = color;
+                            } else {
+                                // If the pixel is not found (which shouldn't happen), add it and its color
+                                existingSeam.pixels.push(p);
+                                if (!existingSeam.colors) {
+                                    existingSeam.colors = [];
+                                }
+                                existingSeam.colors.push(color);
+                            }
+                        } else {
+                            // Otherwise, create a new seam with this part and store the color
+                            globalSeams.push({
+                                partKey: [activePart], // Make partKey an array
+                                pixels: [p],
+                                colors: [color] // Store the color with the pixel
+                            });
+                        }
+                    };
+                });
+                ctx.fillStyle = 'orange';
                 ctx.closePath();
                 ctx.fill();
             });
+
+            // Draw global seam pixels for this part in green if they exist
+            const partSeams = globalSeams.filter(seam => Array.isArray(seam.partKey) ? seam.partKey.includes(activePart) : seam.partKey === activePart);
+            if (partSeams.length > 0) {
+                ctx.globalAlpha = 0.6;
+                ctx.strokeStyle = 'green';
+                ctx.lineWidth = 3;
+
+                partSeams.forEach(seam => {
+                    const pixels = seam.pixels;
+                    if (pixels && pixels.length > 0) {
+                        ctx.beginPath();
+                        ctx.moveTo(pixels[0].x, pixels[0].y);
+                        pixels.forEach((p, i) => i !== 0 && ctx.lineTo(p.x, p.y));
+                        ctx.closePath();
+                        ctx.stroke();
+                    }
+                });
+            }
+
             ctx.globalAlpha = 1.0;
 
             if (part.anchor) {
@@ -212,7 +338,7 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
             currentPath.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
             ctx.stroke();
         }
-    }, [image, parts, activePart, isDrawing, currentPath, animationParams]);
+    }, [image, parts, activePart, isDrawing, currentPath, animationParams, globalSeams]);
 
     return (
         <div className="bg-gray-900 rounded-lg p-4 flex flex-col items-center justify-center relative">
@@ -221,7 +347,8 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
                 <div className="text-xs text-gray-400 bg-gray-950 p-2 rounded-md flex items-start gap-2">
                     <AlertTriangle size={24} className="text-yellow-400 flex-shrink-0"/>
                     <div>
-                        Draw to select. Hold <kbd className="px-1.5 py-0.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-md">Alt</kbd> and click to set anchor. Long-press on mobile.
+                        Draw to select. Hold <kbd className="px-1.5 py-0.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-md">Alt</kbd> and click to set anchor. Long-press on mobile. 
+                        Hold <kbd className="px-1.5 py-0.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-md">Shift</kbd> while drawing to create seams (highlighted in green).
                     </div>
                 </div>
             </div>
