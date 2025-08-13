@@ -522,7 +522,7 @@ const VertexEditor = ({ bitmaps, parts, activePart, onPartsChange, animationPara
     return (
         <div className="bg-gray-900 rounded-lg p-4 flex flex-col items-center justify-center relative">
             <div className="w-full mb-2">
-                <h3 className="text-lg font-semibold text-gray-300">Vertex Editor</h3>
+                <h3 className="text-lg font-semibold text-gray-300">Seam Editor</h3>
                 <div className="flex items-center gap-2 mb-2">
                     {vertexGroups.map((groupData, index) => (
                         <div key={index} className="flex items-center">

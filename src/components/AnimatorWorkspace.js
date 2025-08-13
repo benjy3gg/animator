@@ -175,7 +175,7 @@ const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChang
                             className={`px-4 py-2 rounded-r-md ${editorMode === 'vertex' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'}`}
                             onClick={() => setEditorMode('vertex')}
                         >
-                            Vertex Editor
+                            Seam Editor
                         </button>
                     </div>
 

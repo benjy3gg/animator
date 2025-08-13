@@ -1,14 +1,31 @@
 import React, { useState } from 'react';
-import { Copy, Save } from 'lucide-react';
+import { Copy, Save, Image as ImageIcon } from 'lucide-react';
 
-const ConfigModal = ({ config, onClose, onLoad }) => {
+const ConfigModal = ({ config, onClose, onLoad, image }) => {
     const [jsonInput, setJsonInput] = useState(JSON.stringify(config, null, 2));
-    const [copyButtonText, setCopyButtonText] = useState('Copy');
+    const [copyConfigText, setCopyConfigText] = useState('Copy Config');
+    const [copyImageText, setCopyImageText] = useState('Copy Image');
 
-    const handleCopy = () => {
+    const handleCopyConfig = () => {
         navigator.clipboard.writeText(jsonInput);
-        setCopyButtonText('Copied!');
-        setTimeout(() => setCopyButtonText('Copy'), 2000);
+        setCopyConfigText('Copied!');
+        setTimeout(() => setCopyConfigText('Copy Config'), 2000);
+    };
+
+    const handleCopyImageBase64 = () => {
+        if (!image) {
+            alert("No image is loaded to copy.");
+            return;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(image, 0, 0);
+        const base64Image = canvas.toDataURL();
+        navigator.clipboard.writeText(base64Image);
+        setCopyImageText('Copied!');
+        setTimeout(() => setCopyImageText('Copy Image'), 2000);
     };
 
     return (
@@ -34,8 +51,11 @@ const ConfigModal = ({ config, onClose, onLoad }) => {
                     </div>
                 </div>
                 <div className="p-4 border-t border-gray-700 flex justify-end gap-3">
-                    <button onClick={handleCopy} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-md">
-                        <Copy size={16} /> {copyButtonText}
+                    <button onClick={handleCopyConfig} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-md">
+                        <Copy size={16} /> {copyConfigText}
+                    </button>
+                    <button onClick={handleCopyImageBase64} className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-md disabled:bg-gray-500 disabled:cursor-not-allowed" disabled={!image}>
+                        <ImageIcon size={16} /> {copyImageText}
                     </button>
                     <button onClick={() => onLoad(jsonInput)} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 px-4 py-2 rounded-md">
                         <Save size={16} /> Load This Config

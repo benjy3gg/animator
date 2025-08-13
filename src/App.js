@@ -34,16 +34,19 @@ const App = () => {
     const [activeVertexGroupIndex, setActiveVertexGroupIndex] = useState(0);
     const previewCanvasRef = useRef(null);
 
+    const DEFAULT_CONFIG_URL = 'https://gist.githubusercontent.com/benjy3gg/ab4b3248df5c0494a0c3a39c77a26e05/raw/4744457b6398432fea9151481d73c0bdc06dc25e/gistfile1.txt';
+    const DEFAULT_IMAGE_URL = 'https://gist.githubusercontent.com/benjy3gg/5092a16e7ac274d59cad7638b318a00a/raw/459148419a0838b0298ce32f20aa26a7d966c8d7/gistfile1.txt';
+
     useEffect(() => {
         loadScript('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js')
             .catch(err => console.error(err));
 
         // Fetch default data on initial load from URLs
-        const fetchDefaults = async () => {
+        const fetchDefaults = async (configUrl, imageUrl) => {
             try {
                 const [configRes, imageRes] = await Promise.all([
-                    fetch('https://gist.githubusercontent.com/benjy3gg/ab4b3248df5c0494a0c3a39c77a26e05/raw/4744457b6398432fea9151481d73c0bdc06dc25e/gistfile1.txt'),
-                    fetch('https://gist.githubusercontent.com/benjy3gg/5092a16e7ac274d59cad7638b318a00a/raw/459148419a0838b0298ce32f20aa26a7d966c8d7/gistfile1.txt')
+                    fetch(configUrl),
+                    fetch(imageUrl)
                 ]);
 
                 if (!configRes.ok || !imageRes.ok) {
@@ -53,7 +56,7 @@ const App = () => {
                 const configJson = await configRes.json();
                 const imageBase64 = await imageRes.text();
 
-                const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder } = configJson;
+                const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder, vertexGroups: newVertexGroups } = configJson;
 
                 if (newParts && newAnimParams && newPartOrder) {
                     const img = new Image();
@@ -61,6 +64,12 @@ const App = () => {
                         setImage(img);
                         setAnimationParams(newAnimParams);
                         setPartOrder(newPartOrder);
+                        if (newVertexGroups) {
+                            setVertexGroups(newVertexGroups);
+                        } else {
+                            setVertexGroups([{ vertices: [], color: null }]);
+                        }
+                        setActiveVertexGroupIndex(0);
                         // Important: Set parts state and then let useEffect trigger bitmap update
                         setParts(newParts); 
                     };
@@ -75,7 +84,15 @@ const App = () => {
             }
         };
 
-        fetchDefaults();
+        const queryParams = new URLSearchParams(window.location.search);
+        const configUrl = queryParams.get('configUrl');
+        const imageUrl = queryParams.get('imageUrl');
+
+        if (configUrl && imageUrl) {
+            fetchDefaults(configUrl, imageUrl);
+        } else {
+            fetchDefaults(DEFAULT_CONFIG_URL, DEFAULT_IMAGE_URL);
+        }
     }, []);
 
     // Function to update bitmaps based on user-drawn paths only
@@ -186,8 +203,11 @@ const App = () => {
                 setParts(newParts);
                 if (newVertexGroups) {
                     setVertexGroups(newVertexGroups);
-                    setActiveVertexGroupIndex(0);
+                } else {
+                    // If config doesn't have vertex groups, reset them
+                    setVertexGroups([{ vertices: [], color: null }]);
                 }
+                setActiveVertexGroupIndex(0);
                 setIsModalOpen(false);
             } else {
                 alert("Invalid configuration format.");
@@ -202,8 +222,8 @@ const App = () => {
         try {
             setIsLoadingDefaults(true);
             const [configRes, imageRes] = await Promise.all([
-                fetch('https://gist.githubusercontent.com/benjy3gg/ab4b3248df5c0494a0c3a39c77a26e05/raw/4744457b6398432fea9151481d73c0bdc06dc25e/gistfile1.txt'),
-                fetch('https://gist.githubusercontent.com/benjy3gg/5092a16e7ac274d59cad7638b318a00a/raw/459148419a0838b0298ce32f20aa26a7d966c8d7/gistfile1.txt')
+                fetch(DEFAULT_CONFIG_URL),
+                fetch(DEFAULT_IMAGE_URL)
             ]);
 
             if (!configRes.ok || !imageRes.ok) {
@@ -213,7 +233,7 @@ const App = () => {
             const configJson = await configRes.json();
             const imageBase64 = await imageRes.text();
 
-            const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder } = configJson;
+            const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder, vertexGroups: newVertexGroups } = configJson;
 
             if (newParts && newAnimParams && newPartOrder) {
                 const img = new Image();
@@ -221,6 +241,12 @@ const App = () => {
                     setImage(img);
                     setAnimationParams(newAnimParams);
                     setPartOrder(newPartOrder);
+                    if (newVertexGroups) {
+                        setVertexGroups(newVertexGroups);
+                    } else {
+                        setVertexGroups([{ vertices: [], color: null }]);
+                    }
+                    setActiveVertexGroupIndex(0);
                     setParts(newParts);
                 };
                 img.src = imageBase64;
@@ -285,6 +311,7 @@ const App = () => {
             <Footer />
             {isModalOpen && (
                 <ConfigModal 
+                    image={image}
                     config={{ parts, animationParams, partOrder, vertexGroups }}
                     onClose={() => setIsModalOpen(false)}
                     onLoad={loadConfig}
