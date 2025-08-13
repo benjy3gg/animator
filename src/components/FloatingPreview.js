@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 
-const FloatingPreview = ({ bitmaps, parts, partOrder, animationParams, globalSeams = [], previewCanvasRef }) => {
+const FloatingPreview = ({ bitmaps, parts, partOrder, animationParams, previewCanvasRef }) => {
     const canvasRef = useRef(null);
     const animationFrameId = useRef();
 

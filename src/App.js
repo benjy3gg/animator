@@ -17,7 +17,6 @@ const App = () => {
     const [partOrder, setPartOrder] = useState([]);
     const [bitmaps, setBitmaps] = useState({});
     const [animationParams, setAnimationParams] = useState({});
-    const [globalSeams, setGlobalSeams] = useState([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     // Check if user has seen the help modal before
     const [isHelpModalOpen, setIsHelpModalOpen] = useState(() => {
@@ -31,6 +30,8 @@ const App = () => {
     });
     const [isRendering, setIsRendering] = useState(false);
     const [isLoadingDefaults, setIsLoadingDefaults] = useState(true);
+    const [vertexGroups, setVertexGroups] = useState([{ vertices: [], color: null }]);
+    const [activeVertexGroupIndex, setActiveVertexGroupIndex] = useState(0);
     const previewCanvasRef = useRef(null);
 
     useEffect(() => {
@@ -52,7 +53,7 @@ const App = () => {
                 const configJson = await configRes.json();
                 const imageBase64 = await imageRes.text();
 
-                const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder, globalSeams: newGlobalSeams } = configJson;
+                const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder } = configJson;
 
                 if (newParts && newAnimParams && newPartOrder) {
                     const img = new Image();
@@ -60,10 +61,6 @@ const App = () => {
                         setImage(img);
                         setAnimationParams(newAnimParams);
                         setPartOrder(newPartOrder);
-                        // Set global seams if they exist in the config
-                        if (newGlobalSeams) {
-                            setGlobalSeams(newGlobalSeams);
-                        }
                         // Important: Set parts state and then let useEffect trigger bitmap update
                         setParts(newParts); 
                     };
@@ -175,20 +172,21 @@ const App = () => {
         setBitmaps({});
         setAnimationParams({});
         setPartOrder([]);
-        setGlobalSeams([]);
+        setVertexGroups([{ vertices: [], color: null }]);
+        setActiveVertexGroupIndex(0);
         setIsLoadingDefaults(false); // Fix: Ensure we show the uploader after reset
     };
 
     const loadConfig = (config) => {
         try {
-            const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder, globalSeams: newGlobalSeams } = JSON.parse(config);
+            const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder, vertexGroups: newVertexGroups } = JSON.parse(config);
             if (newParts && newAnimParams && newPartOrder) {
                 setAnimationParams(newAnimParams);
                 setPartOrder(newPartOrder);
                 setParts(newParts);
-                // Set global seams if they exist in the config
-                if (newGlobalSeams) {
-                    setGlobalSeams(newGlobalSeams);
+                if (newVertexGroups) {
+                    setVertexGroups(newVertexGroups);
+                    setActiveVertexGroupIndex(0);
                 }
                 setIsModalOpen(false);
             } else {
@@ -215,7 +213,7 @@ const App = () => {
             const configJson = await configRes.json();
             const imageBase64 = await imageRes.text();
 
-            const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder, globalSeams: newGlobalSeams } = configJson;
+            const { parts: newParts, animationParams: newAnimParams, partOrder: newPartOrder } = configJson;
 
             if (newParts && newAnimParams && newPartOrder) {
                 const img = new Image();
@@ -224,10 +222,6 @@ const App = () => {
                     setAnimationParams(newAnimParams);
                     setPartOrder(newPartOrder);
                     setParts(newParts);
-                    // Set global seams if they exist in the config
-                    if (newGlobalSeams) {
-                        setGlobalSeams(newGlobalSeams);
-                    }
                 };
                 img.src = imageBase64;
             } else {
@@ -250,12 +244,20 @@ const App = () => {
                     isRendering={isRendering}
                     onDownloadGif={(scale) => {
                         if (window.GIF) {
-                            generateGif(bitmaps, parts, animationParams, partOrder, setIsRendering, scale);
+                            generateGif({bitmaps, parts, animationParams, partOrder, vertexGroups, setIsRendering, scale});
                         } else {
                             alert("GIF library not loaded yet. Please try again in a moment.");
                         }
                     }}
-                    onDownloadSpritesheet={(scale) => generateSpritesheet(bitmaps, parts, animationParams, partOrder, setIsRendering, scale)}
+                    onDownloadSpritesheet={(scale) => generateSpritesheet({
+                        bitmaps,
+                        parts,
+                        animationParams,
+                        partOrder,
+                        vertexGroups,
+                        setIsRendering,
+                        scale
+                    })}
                 />
                 {isLoadingDefaults ? (
                     <div className="text-center p-8">Loading default sprite...</div>
@@ -271,17 +273,19 @@ const App = () => {
                         bitmaps={bitmaps}
                         animationParams={animationParams}
                         setAnimationParams={setAnimationParams}
-                        globalSeams={globalSeams}
-                        setGlobalSeams={setGlobalSeams}
                         previewCanvasRef={previewCanvasRef}
+                        vertexGroups={vertexGroups}
+                        setVertexGroups={setVertexGroups}
+                        activeVertexGroupIndex={activeVertexGroupIndex}
+                        setActiveVertexGroupIndex={setActiveVertexGroupIndex}
                     />
                 )}
             </div>
-            {image && <FloatingPreview bitmaps={bitmaps} parts={parts} partOrder={partOrder} animationParams={animationParams} globalSeams={globalSeams} previewCanvasRef={previewCanvasRef} />}
+            {image && <FloatingPreview bitmaps={bitmaps} parts={parts} partOrder={partOrder} animationParams={animationParams} previewCanvasRef={previewCanvasRef} />}
             <Footer />
             {isModalOpen && (
                 <ConfigModal 
-                    config={{ parts, animationParams, partOrder, globalSeams }}
+                    config={{ parts, animationParams, partOrder, vertexGroups }}
                     onClose={() => setIsModalOpen(false)}
                     onLoad={loadConfig}
                 />

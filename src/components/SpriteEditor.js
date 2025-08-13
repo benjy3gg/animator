@@ -60,7 +60,7 @@ const createUniformVertices = (path, spacing = 20) => {
     return uniformVertices;
 };
 
-const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams, globalSeams, setGlobalSeams }) => {
+const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams }) => {
     const canvasRef = useRef(null);
     const [isDrawing, setIsDrawing] = useState(false);
     const [currentPath, setCurrentPath] = useState([]);
@@ -313,56 +313,6 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
                             b: colorData[2],
                             a: colorData[3] / 255
                         };
-
-                        // Check if this pixel is already part of an existing seam
-                        const existingSeamIndex = globalSeams.findIndex(seam => 
-                            seam.pixels.some(pixel => 
-                                Math.abs(pixel.x - p.x) < 5 && Math.abs(pixel.y - p.y) < 5
-                            )
-                        );
-
-                        if (existingSeamIndex !== -1) {
-                            // If this pixel is close to an existing seam, add this part to that seam's partKey array
-                            const existingSeam = globalSeams[existingSeamIndex];
-                            if (!existingSeam.partKey.includes(activePart)) {
-                                existingSeam.partKey.push(activePart);
-                            }
-
-                            // Find the index of the pixel in the existing seam
-                            const pixelIndex = existingSeam.pixels.findIndex(pixel => 
-                                Math.abs(pixel.x - p.x) < 5 && Math.abs(pixel.y - p.y) < 5
-                            );
-
-                            // If the pixel is found, update its color
-                            if (pixelIndex !== -1) {
-                                // Initialize colors array if it doesn't exist
-                                if (!existingSeam.colors) {
-                                    existingSeam.colors = [];
-                                }
-
-                                // Ensure the colors array is at least as long as the pixels array
-                                while (existingSeam.colors.length < existingSeam.pixels.length) {
-                                    existingSeam.colors.push(null);
-                                }
-
-                                // Update the color at the pixel index
-                                existingSeam.colors[pixelIndex] = color;
-                            } else {
-                                // If the pixel is not found (which shouldn't happen), add it and its color
-                                existingSeam.pixels.push(p);
-                                if (!existingSeam.colors) {
-                                    existingSeam.colors = [];
-                                }
-                                existingSeam.colors.push(color);
-                            }
-                        } else {
-                            // Otherwise, create a new seam with this part and store the color
-                            globalSeams.push({
-                                partKey: [activePart], // Make partKey an array
-                                pixels: [p],
-                                colors: [color] // Store the color with the pixel
-                            });
-                        }
                     };
                 });
                 offscreenCtx.closePath();
@@ -388,25 +338,6 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
 
             // Draw the offscreen canvas onto the main canvas
             ctx.drawImage(offscreenCanvas, 0, 0);
-
-            // Draw global seam pixels for this part in green if they exist
-            const partSeams = globalSeams.filter(seam => Array.isArray(seam.partKey) ? seam.partKey.includes(activePart) : seam.partKey === activePart);
-            if (partSeams.length > 0) {
-                ctx.globalAlpha = 0.6;
-                ctx.strokeStyle = 'green';
-                ctx.lineWidth = 3;
-
-                partSeams.forEach(seam => {
-                    const pixels = seam.pixels;
-                    if (pixels && pixels.length > 0) {
-                        ctx.beginPath();
-                        ctx.moveTo(pixels[0].x, pixels[0].y);
-                        pixels.forEach((p, i) => i !== 0 && ctx.lineTo(p.x, p.y));
-                        ctx.closePath();
-                        ctx.stroke();
-                    }
-                });
-            }
 
             // Draw vertices on the borders of the part as circles
             if (part.paths.add.length > 0) {
@@ -487,7 +418,7 @@ const SpriteEditor = ({ image, parts, activePart, onPartsChange, animationParams
             currentPath.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
             ctx.stroke();
         }
-    }, [image, parts, activePart, isDrawing, currentPath, animationParams, globalSeams]);
+    }, [image, parts, activePart, isDrawing, currentPath, animationParams]);
 
     return (
         <div className="bg-gray-900 rounded-lg p-4 flex flex-col items-center justify-center relative">

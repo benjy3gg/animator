@@ -92,10 +92,11 @@ const createConvexHull = (points) => {
 };
         
 // Animation drawing logic
-export const drawFrame = (ctx, bitmaps, parts, animationParams, partOrder, time, globalSeams = []) => {
+export const drawFrame = (ctx, options) => {
+    const { bitmaps, parts, animationParams, partOrder, time, vertexGroups = [] } = options;
     const ANIMATION_DURATION = 2000; // 2 seconds
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-    if(bitmaps.staticBody) ctx.drawImage(bitmaps.staticBody, 0, 0);
+    //if(bitmaps.staticBody) ctx.drawImage(bitmaps.staticBody, 0, 0);
 
     const transformedParts = [];
 
@@ -126,156 +127,96 @@ export const drawFrame = (ctx, bitmaps, parts, animationParams, partOrder, time,
         });
     });
 
-    const allTransformedVertices = [];
-    const allOriginalVerticesWithBitmaps = [];
-    transformedParts.forEach(({ part, bitmap, transform }) => {
-        if (part.selectedVertices && part.selectedVertices.length > 0) {
-            const vertexPoints = part.selectedVertices.map(v => {
-                const path = v.pathType === 'add' 
-                    ? part.paths.add[v.pathIndex] 
-                    : part.paths.subtract[v.pathIndex];
-                if (!path) return null;
-                const uniformVertices = createUniformVertices(path);
-                return uniformVertices[v.vertexIndex];
-            }).filter(Boolean);
+    vertexGroups.forEach(groupData => {
+        const group = Array.isArray(groupData) ? groupData : groupData.vertices;
+        const customColor = (groupData && !Array.isArray(groupData)) ? groupData.color : null;
 
-            vertexPoints.forEach(vertex => {
-                allOriginalVerticesWithBitmaps.push({ vertex, bitmap });
-            });
+        if (!group || group.length < 3) return;
 
-            const transformedVertexPoints = transformPoints(vertexPoints, transform, part.anchor);
-            allTransformedVertices.push(...transformedVertexPoints);
+        const allTransformedVertices = [];
+        const allOriginalVerticesWithBitmaps = [];
+
+        group.forEach((vertexData) => {
+            const transformedPart = transformedParts.find(p => p.key === vertexData.partId);
+            if (!transformedPart) return;
+
+            const { part, bitmap, transform } = transformedPart;
+            const path = vertexData.pathType === 'add'
+                ? part.paths.add[vertexData.pathIndex]
+                : part.paths.subtract[vertexData.pathIndex];
+            if (!path) return;
+
+            const uniformVertices = createUniformVertices(path);
+            const vertex = uniformVertices[vertexData.vertexIndex];
+            if (!vertex) return;
+
+            allOriginalVerticesWithBitmaps.push({ vertex, bitmap });
+            const transformedVertex = transformPoints([vertex], transform, part.anchor)[0];
+            if (transformedVertex) {
+                allTransformedVertices.push(transformedVertex);
+            }
+        });
+
+        if (allTransformedVertices.length >= 3) {
+            const parseRgba = (rgba) => {
+                const match = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)/);
+                if (!match) return {r: 0, g: 0, b: 0, a: 0};
+                return {
+                    r: parseInt(match[1], 10),
+                    g: parseInt(match[2], 10),
+                    b: parseInt(match[3], 10),
+                    a: match[4] ? parseFloat(match[4]) : 1
+                };
+            };
+
+            let polygonColor;
+            if (customColor) {
+                polygonColor = customColor;
+            } else {
+                let totalR = 0, totalG = 0, totalB = 0, totalA = 0;
+                allOriginalVerticesWithBitmaps.forEach(({vertex, bitmap}) => {
+                    const colorString = getColorAtPixel(bitmap, vertex.x, vertex.y);
+                    const color = parseRgba(colorString);
+                    totalR += color.r;
+                    totalG += color.g;
+                    totalB += color.b;
+                    totalA += color.a;
+                });
+    
+                const numVertices = allOriginalVerticesWithBitmaps.length;
+                const avgR = Math.floor(totalR / numVertices);
+                const avgG = Math.floor(totalG / numVertices);
+                const avgB = Math.floor(totalB / numVertices);
+                //const avgA = totalA / numVertices;
+    
+                polygonColor = `rgba(${avgR}, ${avgG}, ${avgB}, 1.0)`
+            }
+
+            const hullVertices = createConvexHull([...allTransformedVertices]);
+
+            if (hullVertices.length >= 3) {
+                const center = hullVertices.reduce((acc, p) => ({x: acc.x + p.x, y: acc.y + p.y}), {x: 0, y: 0});
+                center.x /= hullVertices.length;
+                center.y /= hullVertices.length;
+
+                const scaleFactor = 1.2;
+                const scaledHullVertices = hullVertices.map(p => ({
+                    x: center.x + (p.x - center.x) * scaleFactor,
+                    y: center.y + (p.y - center.y) * scaleFactor
+                }));
+
+                ctx.fillStyle = polygonColor;
+                ctx.beginPath();
+                ctx.moveTo(scaledHullVertices[0].x, scaledHullVertices[0].y);
+                for (let i = 1; i < scaledHullVertices.length; i++) {
+                    ctx.lineTo(scaledHullVertices[i].x, scaledHullVertices[i].y);
+                }
+                ctx.closePath();
+                ctx.fill();
+            }
+
         }
     });
-
-    if (allTransformedVertices.length >= 3) {
-        const parseRgba = (rgba) => {
-            const match = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)/);
-            if (!match) return { r: 0, g: 0, b: 0, a: 0 };
-            return {
-                r: parseInt(match[1], 10),
-                g: parseInt(match[2], 10),
-                b: parseInt(match[3], 10),
-                a: match[4] ? parseFloat(match[4]) : 1
-            };
-        };
-
-        let totalR = 0, totalG = 0, totalB = 0, totalA = 0;
-        allOriginalVerticesWithBitmaps.forEach(({ vertex, bitmap }) => {
-            const colorString = getColorAtPixel(bitmap, vertex.x, vertex.y);
-            const color = parseRgba(colorString);
-            totalR += color.r;
-            totalG += color.g;
-            totalB += color.b;
-            totalA += color.a;
-        });
-
-        const numVertices = allOriginalVerticesWithBitmaps.length;
-        const avgR = Math.floor(totalR / numVertices);
-        const avgG = Math.floor(totalG / numVertices);
-        const avgB = Math.floor(totalB / numVertices);
-        const avgA = totalA / numVertices;
-
-        const averageColor = `rgba(${avgR}, ${avgG}, ${avgB}, ${avgA})`;
-
-        const hullVertices = createConvexHull([...allTransformedVertices]);
-
-        if (hullVertices.length >= 3) {
-            const center = hullVertices.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
-            center.x /= hullVertices.length;
-            center.y /= hullVertices.length;
-
-            const scaleFactor = 1.1;
-            const scaledHullVertices = hullVertices.map(p => ({
-                x: center.x + (p.x - center.x) * scaleFactor,
-                y: center.y + (p.y - center.y) * scaleFactor
-            }));
-
-            ctx.fillStyle = 'red';
-            ctx.beginPath();
-            ctx.moveTo(scaledHullVertices[0].x, scaledHullVertices[0].y);
-            for (let i = 1; i < scaledHullVertices.length; i++) {
-                ctx.lineTo(scaledHullVertices[i].x, scaledHullVertices[i].y);
-            }
-            ctx.closePath();
-            ctx.fill();
-        }
-    }
-
-    if (false && globalSeams && globalSeams.length > 0) {
-        globalSeams.forEach(seam => {
-            if (Array.isArray(seam.partKey) && seam.partKey.length === 2) {
-                const partAKey = seam.partKey[0];
-                const partBKey = seam.partKey[1];
-
-                const partA = transformedParts.find(part => part.key === partAKey);
-                const partB = transformedParts.find(part => part.key === partBKey);
-
-                if (!partA || !partB || !partA.part.boundingBox || !partB.part.boundingBox) {
-                    return;
-                }
-
-                const transformedPixelsA = transformPoints(seam.pixels, partA.transform, partA.part.anchor);
-                const transformedPixelsB = transformPoints(seam.pixels, partB.transform, partB.part.anchor);
-
-                if (transformedPixelsA.length < 1 || transformedPixelsB.length < 1) {
-                    return;
-                }
-
-                ctx.save();
-                ctx.lineWidth = 20;
-                ctx.globalAlpha = 1.0;
-
-                for (let i = 0; i < transformedPixelsA.length; i++) {
-                    const pointA = transformedPixelsA[i];
-                    const pointB = transformedPixelsB[i];
-
-                    let r, g, b, a;
-
-                    if (seam.colors && seam.colors[i]) {
-                        const color = seam.colors[i];
-                        r = color.r;
-                        g = color.g;
-                        b = color.b;
-                        a = color.a;
-                    } else {
-                        const originalPixel = seam.pixels[i];
-
-                        const colorA = getColorAtPixel(partA.bitmap, originalPixel.x, originalPixel.y);
-                        const colorB = getColorAtPixel(partB.bitmap, originalPixel.x, originalPixel.y);
-
-                        const parseRgba = (rgba) => {
-                            const match = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)/);
-                            if (!match) return { r: 0, g: 0, b: 0, a: 0 };
-                            return {
-                                r: parseInt(match[1], 10),
-                                g: parseInt(match[2], 10),
-                                b: parseInt(match[3], 10),
-                                a: match[4] ? parseFloat(match[4]) : 1
-                            };
-                        };
-
-                        const rgbaA = parseRgba(colorA);
-                        const rgbaB = parseRgba(colorB);
-
-                        r = Math.floor((rgbaA.r + rgbaB.r) / 2);
-                        g = Math.floor((rgbaA.g + rgbaB.g) / 2);
-                        b = Math.floor((rgbaA.b + rgbaB.b) / 2);
-                        a = (rgbaA.a + rgbaB.a) / 2;
-                    }
-
-                    ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
-
-                    ctx.beginPath();
-                    ctx.moveTo(pointA.x, pointA.y);
-                    ctx.lineTo(pointB.x, pointB.y);
-                    ctx.stroke();
-                }
-
-                ctx.restore();
-            }
-        });
-    }
 
     transformedParts.forEach(({ key, part, bitmap, params, transform }) => {
         const applyTint = params.tintIntensity > 0;
@@ -310,7 +251,6 @@ export const drawFrame = (ctx, bitmaps, parts, animationParams, partOrder, time,
 
         ctx.restore();
     });
-
 };
 
 export const getColorAtPixel = (bitmap, x, y) => {
@@ -363,7 +303,7 @@ export const findSeamBetweenParts = (partA, partB) => {
                     const pointB = pathB[j];
 
                     const distance = Math.sqrt(
-                        Math.pow(pointA.x - pointB.x, 2) +
+                        Math.pow(pointA.x - pointB.x, 2) + 
                         Math.pow(pointA.y - pointB.y, 2)
                     );
 

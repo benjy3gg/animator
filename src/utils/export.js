@@ -1,11 +1,14 @@
 import { drawFrame } from './animation';
 
 // GIF Generation Logic
-export const generateGif = async (bitmaps, parts, animationParams, partOrder, setIsRendering, scale = 1) => {
-    if (!bitmaps.staticBody) {
+export const generateGif = async (options) => {
+    // Defensive check to ensure options and required properties are present
+    if (!options || !options.bitmaps || !options.bitmaps.staticBody) {
         alert("Cannot generate GIF without a loaded image.");
         return;
     }
+    const { bitmaps, parts, animationParams, partOrder, vertexGroups, setIsRendering, scale = 1 } = options;
+
     setIsRendering(true);
 
     let workerUrl = null;
@@ -37,7 +40,7 @@ export const generateGif = async (bitmaps, parts, animationParams, partOrder, se
 
         for (let i = 0; i < TOTAL_FRAMES; i++) {
             const time = i * FRAME_DELAY;
-            drawFrame(tempCtx, bitmaps, parts, animationParams, partOrder, time);
+            drawFrame(tempCtx, { bitmaps, parts, animationParams, partOrder, time, vertexGroups });
 
             if (scale !== 1) {
                 const scaledCanvas = document.createElement('canvas');
@@ -80,11 +83,14 @@ export const generateGif = async (bitmaps, parts, animationParams, partOrder, se
 };
 
 // Spritesheet Generation Logic
-export const generateSpritesheet = (bitmaps, parts, animationParams, partOrder, setIsRendering, scale = 1) => {
-    if (!bitmaps.staticBody) {
+export const generateSpritesheet = (options) => {
+    // Defensive check to ensure options and required properties are present
+    if (!options || !options.bitmaps || !options.bitmaps.staticBody) {
         alert("Cannot generate spritesheet without a loaded image.");
         return;
     }
+    const { bitmaps, parts, animationParams, partOrder, vertexGroups, setIsRendering, scale = 1 } = options;
+
     setIsRendering(true);
 
     const frameWidth = bitmaps.staticBody.width;
@@ -110,7 +116,7 @@ export const generateSpritesheet = (bitmaps, parts, animationParams, partOrder, 
 
     for (let i = 0; i < totalFrames; i++) {
         const time = (DURATION / (totalFrames - 1)) * i; // Ensure the last frame is at the end of the duration
-        drawFrame(tempCtx, bitmaps, parts, animationParams, partOrder, time);
+        drawFrame(tempCtx, { bitmaps, parts, animationParams, partOrder, time, vertexGroups });
 
         const col = i % cols;
         const row = Math.floor(i / cols);

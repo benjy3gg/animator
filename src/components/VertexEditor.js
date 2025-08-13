@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import Magnifier from './Magnifier';
 
 // Function to calculate distance between two points
@@ -60,12 +60,58 @@ const createUniformVertices = (path, spacing = 20) => {
     return uniformVertices;
 };
 
+// Helper function to create a convex hull from a set of points using the Monotone Chain algorithm
+const createConvexHull = (points) => {
+    // Need at least 3 points to form a hull
+    if (points.length <= 3) {
+        // For 3 or fewer points, sorting by angle is sufficient and simpler.
+        const center = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+        center.x /= points.length;
+        center.y /= points.length;
+        return [...points].sort((a, b) => {
+            const angleA = Math.atan2(a.y - center.y, a.x - center.x);
+            const angleB = Math.atan2(b.y - center.y, b.x - center.x);
+            return angleA - angleB;
+        });
+    }
+
+    // Sort points lexicographically (by x, then y) to find the start and end points of the hull
+    points.sort((a, b) => a.x - b.x || a.y - b.y);
+
+    const crossProduct = (o, a, b) => {
+        return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    };
+
+    // Build the lower hull
+    const lower = [];
+    for (const p of points) {
+        while (lower.length >= 2 && crossProduct(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+            lower.pop();
+        }
+        lower.push(p);
+    }
+
+    // Build the upper hull
+    const upper = [];
+    for (let i = points.length - 1; i >= 0; i--) {
+        const p = points[i];
+        while (upper.length >= 2 && crossProduct(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+            upper.pop();
+        }
+        upper.push(p);
+    }
+
+    // Concatenate the lower and upper hulls, removing duplicate start/end points
+    return lower.slice(0, -1).concat(upper.slice(0, -1));
+};
 
 const partColors = ['#4299E1', '#F56565', '#48BB78', '#ED8936', '#9F7AEA', '#38B2AC'];
+const groupColors = ['#F59E0B', '#EF4444', '#10B981', '#3B82F6', '#8B5CF6', '#F97316'];
 const getColor = (index) => partColors[index % partColors.length];
+const getGroupColor = (index) => groupColors[index % groupColors.length];
 const VISUAL_OFFSET = 50;
 
-const VertexEditor = ({ bitmaps, parts, activePart, onPartsChange, animationParams }) => {
+const VertexEditor = ({ bitmaps, parts, activePart, onPartsChange, animationParams, vertexGroups, setVertexGroups, activeVertexGroupIndex, setActiveVertexGroupIndex }) => {
     const canvasRef = useRef(null);
     const [cursorPos, setCursorPos] = useState({ x: 0, y: 0, visible: false });
     const [isShiftPressed, setIsShiftPressed] = useState(false);
@@ -113,31 +159,6 @@ const VertexEditor = ({ bitmaps, parts, activePart, onPartsChange, animationPara
         });
     }, [partIds]);
 
-    const selectedVertices = [];
-    Object.keys(parts).forEach((partId) => {
-        const part = parts[partId];
-        const visualOffset = partPositions[partId] || { x: 0, y: 0 };
-        if (part && part.selectedVertices) {
-            part.selectedVertices.forEach(v => {
-                const path = v.pathType === 'add' ? part.paths.add[v.pathIndex] : part.paths.subtract[v.pathIndex];
-                if (path) {
-                    const uniformVertices = createUniformVertices(path);
-                    const vertex = uniformVertices[v.vertexIndex];
-                    if (vertex) {
-                        selectedVertices.push({
-                            key: `${partId}-${v.pathType}-${v.pathIndex}-${v.vertexIndex}`,
-                            partId: partId,
-                            pathType: v.pathType,
-                            pathIndex: v.pathIndex,
-                            vertexIndex: v.vertexIndex,
-                            vertex: { x: vertex.x + visualOffset.x, y: vertex.y + visualOffset.y }
-                        });
-                    }
-                }
-            });
-        }
-    });
-
     const getCanvasPos = (e) => {
         const canvas = canvasRef.current;
         if (!canvas) return { x: 0, y: 0 };
@@ -174,6 +195,43 @@ const VertexEditor = ({ bitmaps, parts, activePart, onPartsChange, animationPara
     const handleMouseDown = (e) => {
         e.preventDefault();
         const pos = getCanvasPos(e);
+
+        if (e.altKey) {
+            let partUnderCursor = null;
+            let localPos = null;
+
+            const partKeys = Object.keys(parts).reverse();
+            for (const partId of partKeys) {
+                const position = partPositions[partId];
+                const imageData = partImageData[partId];
+
+                if (imageData && position && pos.x >= position.x && pos.x <= position.x + imageData.width && pos.y >= position.y && pos.y <= position.y + imageData.height) {
+                    const localX = Math.floor(pos.x - position.x);
+                    const localY = Math.floor(pos.y - position.y);
+                    const index = (localY * imageData.width + localX) * 4;
+                    const alpha = imageData.data[index + 3];
+
+                    if (alpha > 0) {
+                        const r = imageData.data[index];
+                        const g = imageData.data[index + 1];
+                        const b = imageData.data[index + 2];
+                        const a = alpha / 255;
+                        const pickedColor = `rgba(${r}, ${g}, ${b}, ${a})`;
+
+                        const newVertexGroups = [...vertexGroups];
+                        const currentGroup = newVertexGroups[activeVertexGroupIndex] || { vertices: [], color: null };
+                        
+                        newVertexGroups[activeVertexGroupIndex] = {
+                            vertices: Array.isArray(currentGroup) ? currentGroup : currentGroup.vertices,
+                            color: pickedColor
+                        };
+                        setVertexGroups(newVertexGroups);
+                        return; 
+                    }
+                }
+            }
+            return; 
+        }
 
         let closestVertex = null;
         let closestDistance = Infinity;
@@ -212,52 +270,44 @@ const VertexEditor = ({ bitmaps, parts, activePart, onPartsChange, animationPara
         });
 
         if (closestVertex) {
-            const vertexKey = `${closestPartId}-${closestPathType}-${closestPathIndex}-${closestVertexIndex}`;
-            const isSelected = selectedVertices.some(v => v.key === vertexKey);
+            const vertexData = { partId: closestPartId, pathType: closestPathType, pathIndex: closestPathIndex, vertexIndex: closestVertexIndex };
+            const currentGroupData = vertexGroups[activeVertexGroupIndex] || { vertices: [], color: null };
+            const currentVertices = Array.isArray(currentGroupData) ? currentGroupData : currentGroupData.vertices;
 
-            let newSelectedVertices;
+            const isSelected = currentVertices.some(v => 
+                v.partId === vertexData.partId &&
+                v.pathType === vertexData.pathType &&
+                v.pathIndex === vertexData.pathIndex &&
+                v.vertexIndex === vertexData.vertexIndex
+            );
+
+            let newVertices;
 
             if (isSelected) {
                 if (isShiftPressed) {
-                    newSelectedVertices = selectedVertices.filter(v => v.key !== vertexKey);
+                    newVertices = currentVertices.filter(v => 
+                        !(v.partId === vertexData.partId &&
+                        v.pathType === vertexData.pathType &&
+                        v.pathIndex === vertexData.pathIndex &&
+                        v.vertexIndex === vertexData.vertexIndex)
+                    );
                 } else {
-                    newSelectedVertices = [];
+                    newVertices = [];
                 }
             } else {
-                const newSelection = {
-                    key: vertexKey,
-                    partId: closestPartId,
-                    pathType: closestPathType,
-                    pathIndex: closestPathIndex,
-                    vertexIndex: closestVertexIndex,
-                    vertex: closestVertex
-                };
                 if (isShiftPressed) {
-                    newSelectedVertices = [...selectedVertices, newSelection];
+                    newVertices = [...currentVertices, vertexData];
                 } else {
-                    newSelectedVertices = [newSelection];
+                    newVertices = [vertexData];
                 }
             }
+            const newVertexGroups = [...vertexGroups];
+            newVertexGroups[activeVertexGroupIndex] = {
+                vertices: newVertices,
+                color: Array.isArray(currentGroupData) ? null : currentGroupData.color
+            };
+            setVertexGroups(newVertexGroups);
 
-            const newParts = { ...parts };
-            Object.keys(newParts).forEach(pId => {
-                if (newParts[pId]) {
-                    newParts[pId].selectedVertices = [];
-                }
-            });
-
-            newSelectedVertices.forEach(v => {
-                if (!newParts[v.partId].selectedVertices) {
-                    newParts[v.partId].selectedVertices = [];
-                }
-                newParts[v.partId].selectedVertices.push({
-                    pathType: v.pathType,
-                    pathIndex: v.pathIndex,
-                    vertexIndex: v.vertexIndex
-                });
-            });
-
-            onPartsChange(newParts);
         } else {
             let partToDrag = null;
             Object.keys(parts).reverse().forEach(partId => {
@@ -285,18 +335,6 @@ const VertexEditor = ({ bitmaps, parts, activePart, onPartsChange, animationPara
                         y: pos.y - partPositions[partToDrag].y
                     }
                 });
-            } else {
-                const newParts = { ...parts };
-                let selectionChanged = false;
-                Object.keys(newParts).forEach(pId => {
-                    if (newParts[pId] && newParts[pId].selectedVertices && newParts[pId].selectedVertices.length > 0) {
-                        newParts[pId].selectedVertices = [];
-                        selectionChanged = true;
-                    }
-                });
-                if (selectionChanged) {
-                    onPartsChange(newParts);
-                }
             }
         }
     };
@@ -323,6 +361,19 @@ const VertexEditor = ({ bitmaps, parts, activePart, onPartsChange, animationPara
     const handleMouseLeave = (e) => {
         setDraggingPart(null);
         setCursorPos(prev => ({...prev, visible: false}));
+    };
+
+    const addGroup = () => {
+        setVertexGroups([...vertexGroups, { vertices: [], color: null }]);
+        setActiveVertexGroupIndex(vertexGroups.length);
+    };
+
+    const deleteGroup = (index) => {
+        const newGroups = vertexGroups.filter((_, i) => i !== index);
+        setVertexGroups(newGroups);
+        if (activeVertexGroupIndex >= newGroups.length) {
+            setActiveVertexGroupIndex(Math.max(0, newGroups.length - 1));
+        }
     };
 
     useEffect(() => {
@@ -366,16 +417,22 @@ const VertexEditor = ({ bitmaps, parts, activePart, onPartsChange, animationPara
                     if (path.length > 0) {
                         const uniformVertices = createUniformVertices(path);
                         uniformVertices.forEach((point, vertexIndex) => {
-                            const isSelected = selectedVertices.some(
-                                v => v.key === `${partId}-${pathType}-${pathIndex}-${vertexIndex}`
-                            );
+                            let isSelectedInAnyGroup = false;
+                            let selectionGroupIndex = -1;
+                            vertexGroups.forEach((groupData, i) => {
+                                const vertices = Array.isArray(groupData) ? groupData : groupData.vertices;
+                                if (vertices.some(v => v.partId === partId && v.pathType === pathType && v.pathIndex === pathIndex && v.vertexIndex === vertexIndex)) {
+                                    isSelectedInAnyGroup = true;
+                                    selectionGroupIndex = i;
+                                }
+                            });
 
                             ctx.beginPath();
-                            ctx.arc(point.x + position.x, point.y + position.y, isSelected ? 6 : 4, 0, 2 * Math.PI);
+                            ctx.arc(point.x + position.x, point.y + position.y, isSelectedInAnyGroup ? 6 : 4, 0, 2 * Math.PI);
                             
-                            if (isSelected) {
-                                ctx.fillStyle = '#F59E0B';
-                                ctx.strokeStyle = '#B45309';
+                            if (isSelectedInAnyGroup) {
+                                ctx.fillStyle = getGroupColor(selectionGroupIndex);
+                                ctx.strokeStyle = '#1A365D';
                             } else {
                                 ctx.fillStyle = partColor;
                                 ctx.strokeStyle = '#1A365D';
@@ -394,27 +451,43 @@ const VertexEditor = ({ bitmaps, parts, activePart, onPartsChange, animationPara
             }
         });
 
-        if (selectedVertices && selectedVertices.length >= 3) {
-            ctx.globalAlpha = 0.5;
-            ctx.fillStyle = 'red';
-            ctx.strokeStyle = 'darkred';
-            ctx.lineWidth = 2;
-            
-            ctx.beginPath();
-            
-            const vertexPoints = selectedVertices.map(v => v.vertex).filter(Boolean);
-            
-            if (vertexPoints.length >= 3) {
-                ctx.moveTo(vertexPoints[0].x, vertexPoints[0].y);
-                for (let i = 1; i < vertexPoints.length; i++) {
-                    ctx.lineTo(vertexPoints[i].x, vertexPoints[i].y);
-                }
-                ctx.closePath();
-                ctx.fill();
-                ctx.stroke();
-            }
-        }
+        vertexGroups.forEach((groupData, groupIndex) => {
+            const vertices = Array.isArray(groupData) ? groupData : groupData.vertices;
+            const customColor = (groupData && !Array.isArray(groupData)) ? groupData.color : null;
+            if (vertices.length >= 3) {
+                ctx.globalAlpha = 0.5;
+                ctx.fillStyle = customColor || getGroupColor(groupIndex);
+                ctx.strokeStyle = 'darkred';
+                ctx.lineWidth = 2;
+                
+                ctx.beginPath();
+                
+                const vertexPoints = vertices.map(v => {
+                    const part = parts[v.partId];
+                    const position = partPositions[v.partId];
+                    if (!part || !position) return null;
+                    const path = v.pathType === 'add' ? part.paths.add[v.pathIndex] : (part.paths.subtract && part.paths.subtract[v.pathIndex]);
+                    if (!path) return null;
+                    const uniformVertices = createUniformVertices(path);
+                    const vertex = uniformVertices[v.vertexIndex];
+                    if (!vertex) return null;
+                    return { x: vertex.x + position.x, y: vertex.y + position.y };
+                }).filter(Boolean);
 
+                if (vertexPoints.length >= 3) {
+                    const hullVertices = createConvexHull([...vertexPoints]);
+                    if (hullVertices.length < 3) return;
+
+                    ctx.moveTo(hullVertices[0].x, hullVertices[0].y);
+                    for (let i = 1; i < hullVertices.length; i++) {
+                        ctx.lineTo(hullVertices[i].x, hullVertices[i].y);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+        });
         ctx.globalAlpha = 1.0;
 
         if (parts[activePart] && parts[activePart].anchor) {
@@ -444,17 +517,48 @@ const VertexEditor = ({ bitmaps, parts, activePart, onPartsChange, animationPara
                 ctx.stroke();
             }
         }
-    }, [bitmaps, parts, activePart, animationParams, partPositions, draggingPart]);
+    }, [bitmaps, parts, activePart, animationParams, partPositions, draggingPart, partImageData, vertexGroups, activeVertexGroupIndex]);
 
     return (
         <div className="bg-gray-900 rounded-lg p-4 flex flex-col items-center justify-center relative">
             <div className="w-full mb-2">
                 <h3 className="text-lg font-semibold text-gray-300">Vertex Editor</h3>
+                <div className="flex items-center gap-2 mb-2">
+                    {vertexGroups.map((groupData, index) => (
+                        <div key={index} className="flex items-center">
+                            <div 
+                                className="w-6 h-8 rounded-l-md border-2 border-r-0 border-gray-600"
+                                style={{ backgroundColor: (groupData && groupData.color) || 'transparent' }}
+                            ></div>
+                            <button
+                                className={`px-3 py-1 text-sm ${
+                                    activeVertexGroupIndex === index ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'
+                                } ${(groupData && groupData.color) ? '' : 'rounded-l-md'}`}
+                                onClick={() => setActiveVertexGroupIndex(index)}
+                            >
+                                Group {index + 1}
+                            </button>
+                            <button
+                                className="bg-red-600 text-white p-1.5 rounded-r-md hover:bg-red-700 disabled:bg-gray-500 flex-shrink-0"
+                                onClick={() => deleteGroup(index)}
+                                disabled={vertexGroups.length === 1}
+                            >
+                                <Trash2 size={16} />
+                            </button>
+                        </div>
+                    ))}
+                    <button
+                        className="bg-green-600 text-white p-1.5 rounded-md hover:bg-green-700 flex-shrink-0"
+                        onClick={addGroup}
+                    >
+                        <Plus size={16} />
+                    </button>
+                </div>
                 <div className="text-xs text-gray-400 bg-gray-950 p-2 rounded-md flex items-start gap-2">
                     <AlertTriangle size={24} className="text-yellow-400 flex-shrink-0"/>
                     <div>
-                        Click and drag on a part to move it. Click the background to deselect all vertices. Hold <kbd className="px-1.5 py-0.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-md">Shift</kbd> to select multiple vertices. 
-                        Selected vertices will be used to create a polygon for animation.
+                        Click a part to drag it. Click a vertex to select it. Hold <kbd className="px-1.5 py-0.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-md">Shift</kbd> to select multiple vertices.
+                        Hold <kbd className="px-1.5 py-0.5 text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-md">Alt</kbd> and click a part to pick a color for the current group's polygon.
                     </div>
                 </div>
             </div>

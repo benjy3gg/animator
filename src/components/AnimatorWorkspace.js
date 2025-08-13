@@ -5,7 +5,7 @@ import SpriteEditor from './SpriteEditor';
 import VertexEditor from './VertexEditor';
 import AnimationPreview from './AnimationPreview';
 
-const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChange, bitmaps, animationParams, setAnimationParams, globalSeams, setGlobalSeams, previewCanvasRef }) => {
+const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChange, bitmaps, animationParams, setAnimationParams, previewCanvasRef, vertexGroups, setVertexGroups, activeVertexGroupIndex, setActiveVertexGroupIndex }) => {
     const [activePart, setActivePart] = useState(partOrder[0] || null);
     const [editorMode, setEditorMode] = useState('sprite'); // 'sprite' or 'vertex'
 
@@ -106,6 +106,17 @@ const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChang
         setAnimationParams(remainingParams);
         setPartOrder(partOrder.filter(p => p !== name));
 
+        // Also remove vertices from this part from all vertex groups
+        const newVertexGroups = vertexGroups.map(groupData => {
+            const vertices = Array.isArray(groupData) ? groupData : groupData.vertices;
+            const filteredVertices = vertices.filter(v => v.partId !== name);
+            if (Array.isArray(groupData)) {
+                return filteredVertices;
+            }
+            return { ...groupData, vertices: filteredVertices };
+        });
+        setVertexGroups(newVertexGroups);
+
         if (activePart === name) {
             setActivePart(partOrder.filter(p => p !== name)[0] || null);
         }
@@ -175,8 +186,6 @@ const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChang
                             activePart={activePart}
                             onPartsChange={onPartsChange}
                             animationParams={animationParams}
-                            globalSeams={globalSeams}
-                            setGlobalSeams={setGlobalSeams}
                         />
                     ) : (
                         <VertexEditor 
@@ -185,6 +194,10 @@ const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChang
                             activePart={activePart}
                             onPartsChange={onPartsChange}
                             animationParams={animationParams}
+                            vertexGroups={vertexGroups}
+                            setVertexGroups={setVertexGroups}
+                            activeVertexGroupIndex={activeVertexGroupIndex}
+                            setActiveVertexGroupIndex={setActiveVertexGroupIndex}
                         />
                     )}
                 </div>
@@ -193,8 +206,8 @@ const AnimatorWorkspace = ({ image, parts, partOrder, setPartOrder, onPartsChang
                     parts={parts}
                     partOrder={partOrder}
                     animationParams={animationParams}
-                    globalSeams={globalSeams}
                     canvasRef={previewCanvasRef}
+                    vertexGroups={vertexGroups}
                 />
             </div>
         </div>

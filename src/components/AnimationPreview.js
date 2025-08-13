@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { drawFrame } from '../utils/animation';
 
-const AnimationPreview = ({ bitmaps, parts, partOrder, animationParams, globalSeams, canvasRef }) => {
+const AnimationPreview = ({ bitmaps, parts, partOrder, animationParams, canvasRef, vertexGroups }) => {
     // Use the provided canvasRef or create a local one if not provided
     const localCanvasRef = useRef(null);
     const actualCanvasRef = canvasRef || localCanvasRef;
@@ -19,12 +19,12 @@ const AnimationPreview = ({ bitmaps, parts, partOrder, animationParams, globalSe
         canvas.height = bitmaps.staticBody.height;
 
         const animate = (time) => {
-            drawFrame(ctx, bitmaps, parts, animationParams, partOrder, time, globalSeams);
+            drawFrame(ctx, { bitmaps, parts, animationParams, partOrder, time, vertexGroups });
             animationFrameId.current = requestAnimationFrame(animate);
         };
         animationFrameId.current = requestAnimationFrame(animate);
         return () => cancelAnimationFrame(animationFrameId.current);
-    }, [bitmaps, parts, animationParams, partOrder, globalSeams]);
+    }, [bitmaps, parts, animationParams, partOrder, vertexGroups]);
 
     return (
         <div className="bg-gray-900 rounded-lg p-4 flex flex-col items-center justify-center">
